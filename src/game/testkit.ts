@@ -342,6 +342,20 @@ function nextAction(
       const other = state.players.find(
         (entry) => entry.id !== resolver.id && entry.grid.length > 0,
       );
+      // Sometimes swap two cards of one grid, sometimes two grids.
+      if (resolver.grid.length > 1 && rng.next() < 0.3) {
+        const first = rng.int(resolver.grid.length);
+        let second = rng.int(resolver.grid.length);
+        if (second === first) second = (second + 1) % resolver.grid.length;
+        return {
+          action: {
+            type: "queenSwap",
+            a: { playerId: resolver.id, cardIndex: first },
+            b: { playerId: resolver.id, cardIndex: second },
+          },
+          actor: resolver.id,
+        };
+      }
       if (other && rng.next() < 0.7) {
         return {
           action: {

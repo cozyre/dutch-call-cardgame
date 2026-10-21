@@ -139,10 +139,10 @@ export type Step =
   | { kind: "lobby" }
   | { kind: "setupPeek"; deadlineAt: number | null }
   | { kind: "turnStart" }
-  | { kind: "awaitChoice"; drawn: Card; deadlineAt: number }
+  | { kind: "awaitChoice"; drawn: Card; deadlineAt: number; selectedIndex: number | null }
   | { kind: "matchWindow"; rank: Rank; deadlineAt: number }
   | { kind: "awaitPeek"; deadlineAt: number | null }
-  | { kind: "awaitQueenSwap"; deadlineAt: number | null }
+  | { kind: "awaitQueenSwap"; deadlineAt: number | null; resolverId: PlayerId | null }
   | { kind: "gameOver" };
 
 export interface GameState {
@@ -156,15 +156,22 @@ export interface GameState {
   dutchCallerId: PlayerId | null;
   burnableBy: PlayerId[];     // players still allowed to burn in the open window
   reveals: Reveal[];          // time-limited card reveals (see §4.4)
+  batchPeeks: BatchPeek[];    // cards peeked in the current ability batch
   rngSeed: number;
   rngState: number;
   startedAt: number;
-  result: Standings | null;
+  result: Standing[] | null;
+}
+
+export interface BatchPeek {
+  playerId: PlayerId;
+  cardIndex: number;
 }
 
 export interface Reveal {
   playerId: PlayerId;
   cardIndex: number;
+  cardId: CardId;             // the revealed card itself — a reveal dies if the slot changes
   until: number;              // absolute ms; server stops serving the value after this
 }
 
@@ -185,6 +192,7 @@ export interface Standing {
 export type Action =
   | { type: "startGame" }
   | { type: "peek"; cardIndex: number }
+  | { type: "selectCard"; cardIndex: number }
   | { type: "draw" }
   | { type: "discardDrawn" }
   | { type: "swapDrawn"; cardIndex: number }
@@ -197,6 +205,8 @@ export interface Target { playerId: PlayerId; cardIndex: number; }
 ```
 
 **No action carries a card value, rank, or suit.** A client says "my grid index 3", never "my seven". The server resolves indices against truth state. Reject anything that looks like a self-reported value.
+
+`selectCard` is the PRD §10 "choose Swap but go idle" pre-selection: it records the grid index the active player intends to swap in, so the server can complete that swap automatically when `awaitChoice` expires. It carries no card data — only an index into the actor's own grid.
 
 ### 4.3 Events — server → clients, for transient UI feedback
 
@@ -232,6 +242,7 @@ export interface GameView {
   discardTop: { rank: Rank; suit: Suit; value: number } | null;
   players: { id: PlayerId; name: string; seat: number; isHost: boolean; connected: boolean; cardCount: number }[];
   myGrid: GridCardView[];
+  drawnCard: { rank: Rank; suit: Suit; value: number } | null;
   matchWindow: { rank: Rank; deadlineAt: number } | null;
   canBurn: boolean;
   canDraw: boolean;
@@ -259,7 +270,9 @@ Rules enforced by `projectView` (and asserted by tests):
 - Opponent grids → **count only**. No card identities, ever.
 - `drawPile` → **count only**.
 - `discardPile` → **top card only**.
-- Your own grid → a value appears only if there is a live `Reveal` for `(youId, cardIndex)` with `until > now`. Expired reveals are dropped and never re-served.
+- Your own grid → a value appears only if there is a live `Reveal` for `(youId, cardIndex)` **whose `cardId` still matches the card in that slot** and whose `until > now`. Expired reveals are dropped and never re-served.
+- `drawnCard` → the card in flight, **only for the active player** during `awaitChoice`.
+- `result` → the full standings, including every grid, but only once the phase is `over`.
 
 ### 4.5 Engine API
 
@@ -284,6 +297,10 @@ export function applyTimeout(state: GameState, now: number): ApplyResult | null;
 - `awaitChoice` expired → discard the drawn card (and if a swap was pre-selected, complete that swap instead).
 - `matchWindow` expired → close the window, resolve abilities.
 - `setupPeek` expired → clear remaining peek tokens, start the first turn.
+- `awaitPeek` expired → clear the unused peek tokens, move on to the queen phase if a Queen is pending, otherwise pass the turn.
+- `awaitQueenSwap` expired → every pending queen token expires, the turn passes.
+
+It returns `null` when nothing timed out, so the server's sweeper can call it unconditionally on every tick.
 
 ### 4.6 Engine purity rules (non-negotiable)
 
@@ -370,6 +387,7 @@ turnStart ──a player emptied their grid──▶ gameOver
 Key implementation notes:
 - **Turn order** = seat order (join order), clockwise. The host (seat 0) starts.
 - **`draw`** removes `drawPile[0]` into `step.drawn` and sets `awaitChoice` with a 30s deadline. The drawn card's value is visible **only to the active player** — project it into that player's view, nobody else's.
+- **`selectCard(index)`** records the grid slot the active player intends to swap in (`step.selectedIndex`). It changes nothing else; if `awaitChoice` expires with a slot selected, the server completes that swap instead of discarding the drawn card (PRD §10).
 - **`swapDrawn(index)`** puts the drawn card into the active player's grid at `index` and moves the grid's old card at `index` to the top of the discard pile. The grid slot position is preserved (positions matter in this game).
 - **`discardDrawn`** puts the drawn card on top of the discard pile.
 - **Match window** opens with the rank of the card just placed face-up on the discard pile. Only the active player's discard opens a window — burns inside a window do **not** open new ones (prevents recursion; matches the physical game).
@@ -378,7 +396,7 @@ Key implementation notes:
   - Wrong → the card returns face-down to its original grid slot, the player draws **one penalty card from the top of the center pile** into their grid (net +1 card), and they may not burn again in this window.
 - **Everyone may burn**, including the active player.
 - **`awaitPeek`** — players holding peek tokens may each reveal one card of their own grid. A player with 2 tokens must pick **two different** cards within the batch.
-- **Reveal mechanics** — when a peek is used, add `Reveal { playerId, cardIndex, until: now + 8000 }` to `state.reveals`. The server serves the value only while `until > now`; expired reveals are dropped on the next state transition and never re-served.
+- **Reveal mechanics** — when a peek is used, add `Reveal { playerId, cardIndex, cardId, until: now + 8000 }` to `state.reveals`. The server serves the value only while `until > now` **and** the card in that slot is still the card that was revealed; expired reveals are dropped on the next state transition and never re-served.
 - **Dutch Call** — legal only in `turnStart` and only when the active player's grid has exactly **1** card. Effect: set `dutchCallerId`, advance to the next player without drawing. When `turnStart` comes around to `dutchCallerId`, the game ends and all grids are tallied. Any player who empties their grid during the final round wins outright and overrides the Dutch end.
 - **Game end conditions**
   1. A player empties their grid → immediate win (`wonOutright: true`).
@@ -391,7 +409,7 @@ Key implementation notes:
 - **Jack discarded** (by the active player's discard *or* by a burn): **every** player gains one peek token, including the discarder.
 - **Queen discarded**: the **discarding player** gains one queen token.
 - Tokens are granted in the order the cards hit the discard pile (burn order). Grants accumulate during the match window; the **resolution** phases (`awaitPeek` → `awaitQueenSwap`) run after the window closes, in that fixed order, for simplicity.
-- **Queen swap** — `queenSwap({a, b})`: `a.playerId !== b.playerId` (cross-player), both indices valid, both cards swap positions, both remain **face down** (blind swap, no peek). One swap per token. `declineQueen` discards a token without acting.
+- **Queen swap** — `queenSwap({a, b})`: **any two cards** — the resolver's own grid and another player's grid, two other players' grids, or two cards of a single grid. Both indices must be valid and the two cards must not be the same card. Both cards swap positions, both remain **face down** (blind swap, no peek). One swap per token. `declineQueen` discards a token without acting.
 - A player may hold multiple queen tokens; they are resolved one at a time, in seat order.
 
 ### 6.5 `scoring.ts`
@@ -413,12 +431,13 @@ Implement `projectView` per §4.4. It must be a **pure function of (state, playe
 - Burn correct → card leaves the grid; burn wrong → card returned to its original slot **and** grid grows by exactly 1.
 - Burn by the active player is allowed; a player may not burn twice after a wrong burn.
 - Jack: N jacks in one batch grant N peek tokens to every player; the same card cannot be peeked twice in one batch.
-- Queen: token holder can swap across two different players' grids; both cards stay face down; may decline.
+- Queen: token holder can swap any two cards — across two players' grids, between their own grid and another player's, or between two cards of one grid; both cards stay face down; may decline.
 - Dutch Call: rejected with 2+ cards, rejected when not the player's turn, accepted with exactly 1; game ends when the turn returns to the caller.
 - End: emptying the grid wins outright; center-pile exhaustion completes the final turn then ends the game.
 - Timeouts: `awaitChoice` expiry discards the drawn card; a pre-selected swap auto-completes; `matchWindow` expiry closes the window.
 - Scoring: totals, ordering, co-winners on a tie.
 - **View projection:** opponent grids expose no card data; the draw pile exposes no card data; the discard pile exposes only the top card; a reveal appears only for its owner and only while unexpired; after expiry the value is gone forever.
+- **Reveal binding:** a reveal is bound to the card, not to the slot — a queen swap that replaces the card in a revealed slot kills the reveal, and the new card is never revealed to its new owner.
 - **Card conservation invariant** after every action in every test.
 
 ### 6.8 `scripts/bench.ts`
@@ -553,7 +572,7 @@ The PRD leaves these open. Physical-game research informed the defaults. **Corre
 | A6 | Dutch Call timing | Offered at the start of your turn, **before drawing**, only with exactly 1 card left. |
 | A7 | Dutch Call scoring | No "call failed → double score" rule. The game simply ends and the lowest total wins, per the PRD. |
 | A8 | Dutch Call rotation | Every other player takes exactly one more turn; the game ends when play returns to the caller. A player who empties their grid during that final round wins outright and overrides the Dutch end. |
-| A9 | Queen swap | Blind (no peeking), between two **different** players' grids, one swap per token, declinable. |
+| A9 | Queen swap | Blind (no peeking), between **any** two cards (PRD §5.4.4 "swap-any-two-cards" and §6 "self↔other or other↔other"), one swap per token, declinable. The two cards may come from the resolver's own grid and another player's grid, from two other players' grids, or from a single grid. A card cannot be swapped with itself. |
 | A10 | Jack peek | Granted to **every** player including the discarder, one per Jack in the batch, no card peeked twice within one batch. |
 | A11 | Center pile exhausted | The current final turn completes fully (draw → swap/discard → one last match window), then the game ends and all grids are tallied. The discard pile is **not** recycled. |
 | A12 | Drawing the discard top | Not allowed — the center pile is the only draw source. |
@@ -561,6 +580,10 @@ The PRD leaves these open. Physical-game research informed the defaults. **Corre
 | A14 | Turn order | Join order (seat 0 = host = first player), clockwise. |
 | A15 | Ties in the final tally | Co-winners — both marked `isWinner: true`. |
 | A16 | Burn during the window after a Jack/Queen | The burned Jack/Queen grants its ability (Jack → all players get a peek token; Queen → the burner gets a queen token). Abilities resolve after the window closes, jacks before queens. |
+| A17 | Length of the match window | A fixed **30 s** window (PRD §10), not "until everybody burned". The window closes early only when *every* player has already burned incorrectly (each wrong burn removes that player from the window). A **correct** burn does **not** end that player's chance to burn again — they may still burn a second matching card. |
+| A18 | Length of the ability window | One **30 s** window per ability phase, shared by all token holders. The deadline is **not** refreshed when a queen token is resolved and the next holder takes over; the remaining holders share whatever is left of the original window, and any token still unclaimed when the window closes expires. |
+| A19 | A reveal and a changing slot | A reveal is bound to the **card** it exposed (`Reveal.cardId`), not just to the grid slot. If the card in that slot is replaced before the reveal expires (a queen swap, a swap-draw), the reveal dies and the new card is **not** revealed. The player never learns the value of a card they did not peek at. |
+| A20 | Queen swap scope | The PRD's two mentions were reconciled in favour of the **permissive** reading (PRD §5.4.4: "swap-any-two-cards"). A queen token may swap **any** two cards: the resolver's own grid with another player's grid, two other players' grids, or two cards of one grid. Only a card swapped with itself is rejected (`INVALID_TARGET`). A blind same-grid swap is a reordering of the resolver's own face-down cards — it reveals nothing, so it is not an information leak. |
 
 **Deliberate divergences from the physical game, following the PRD:** red King = 13 (physical: 15 or −2/−3) · Ace = 1 (some variants: −1) · no King ability · no discard-pile draws · single-round scoring rather than a 100-point match · Jack/Queen powers as the PRD defines them · no jokers, standard 52-card deck · 3–6 players with a fixed grid, rather than 2–10 players with 4 cards.
 
@@ -587,6 +610,9 @@ Accounts · login · chat/voice · spectator mode · AI/bot players as participa
 11. **Server-enforced timers only.** The client renders a countdown; the server decides what happens on expiry.
 12. **The deck is `deckCount` separate 52-card decks combined**, not one deck with duplicates. Card ids must stay unique across decks.
 13. **Reconnect grace is 60 seconds**, then the seat is forfeited.
+14. **A reveal binds to a card, not to a slot.** If the card occupying a revealed slot is replaced before the reveal expires (a queen swap, a swap-draw), the reveal must die — otherwise the player is shown the value of a card they never peeked at.
+15. **`selectCard` carries an index, not a card.** It is the PRD §10 "I chose Swap but went idle" pre-selection; the server completes the swap on expiry.
+16. **A queen swap may pick any two cards** — including two cards of the same grid. When both targets sit in one grid, both slots must be rewritten, or a card is silently lost and card conservation breaks.
 
 ---
 

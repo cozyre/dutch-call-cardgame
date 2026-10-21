@@ -87,6 +87,7 @@ export interface BatchPeek {
 export interface Reveal {
   playerId: PlayerId;
   cardIndex: number;
+  cardId: CardId; // the revealed card itself — a reveal dies if the slot changes
   until: number; // absolute ms; server stops serving the value after this
 }
 

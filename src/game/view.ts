@@ -20,7 +20,12 @@ export function projectView(state: GameState, playerId: PlayerId, now: number): 
   );
 
   const myGrid: GridCardView[] = (me?.grid ?? []).map((card, index) => {
-    const reveal = liveReveals.find((entry) => entry.cardIndex === index);
+    // A reveal is bound to the card it exposed. If the slot now holds a
+    // different card (a queen swap, a swap-draw), the reveal is dead — the
+    // player must not learn the value of a card they never peeked.
+    const reveal = liveReveals.find(
+      (entry) => entry.cardIndex === index && entry.cardId === card.id,
+    );
     if (!reveal) {
       return { index, revealed: null, revealedUntil: null };
     }

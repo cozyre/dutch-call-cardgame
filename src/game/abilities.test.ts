@@ -60,8 +60,25 @@ describe("validating a queen swap", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("refuses a swap inside one grid", () => {
-    const result = validateQueenSwap(roster, { playerId: "p0", cardIndex: 0 }, { playerId: "p0", cardIndex: 0 });
+  it("accepts two cards of the same grid", () => {
+    const roster = players({
+      p0: { grid: [card("2", "S"), card("5", "C")] },
+      p1: { grid: [card("3", "H")] },
+    });
+    const result = validateQueenSwap(
+      roster,
+      { playerId: "p0", cardIndex: 0 },
+      { playerId: "p0", cardIndex: 1 },
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses a card swapped with itself", () => {
+    const result = validateQueenSwap(
+      roster,
+      { playerId: "p0", cardIndex: 0 },
+      { playerId: "p0", cardIndex: 0 },
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("INVALID_TARGET");
   });
@@ -89,6 +106,20 @@ describe("swapping grid cards", () => {
     expect(swapped[0].grid.map((entry) => entry.id)).toEqual(["d0-S-2", "d0-D-4"]);
     expect(swapped[1].grid.map((entry) => entry.id)).toEqual(["d0-H-3"]);
     expect(swapped[2].grid).toHaveLength(0);
+  });
+
+  it("exchanges two cards of the same grid without losing either", () => {
+    const roster = players({
+      p0: { grid: [card("2", "S"), card("3", "H"), card("4", "D")] },
+      p1: { grid: [card("5", "C")] },
+    });
+    const swapped = swapGridCards(
+      roster,
+      { playerId: "p0", cardIndex: 0 },
+      { playerId: "p0", cardIndex: 2 },
+    );
+    expect(swapped[0].grid.map((entry) => entry.id)).toEqual(["d0-D-4", "d0-H-3", "d0-S-2"]);
+    expect(swapped[1].grid.map((entry) => entry.id)).toEqual(["d0-C-5"]);
   });
 
   it("does not mutate the roster it was given", () => {

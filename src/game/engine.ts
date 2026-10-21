@@ -89,11 +89,11 @@ export function applyAction(
     case "burn":
       return handleBurn(pruned, actor, action.cardIndex, ctx);
     case "dutchCall":
-      return handleDutchCall(pruned, actor, ctx);
+      return handleDutchCall(pruned, actor);
     case "queenSwap":
-      return handleQueenSwap(pruned, actor, action.a, action.b, ctx);
+      return handleQueenSwap(pruned, actor, action.a, action.b);
     case "declineQueen":
-      return handleDeclineQueen(pruned, actor, ctx);
+      return handleDeclineQueen(pruned, actor);
     default:
       return { ok: false, error: gameError("INVALID_ACTION", "Unknown action.") };
   }
@@ -126,14 +126,14 @@ export function applyTimeout(state: GameState, now: number): ApplyResult | null 
     }
     case "matchWindow": {
       if (now < pruned.step.deadlineAt) return null;
-  const closed = closeMatchWindow(pruned, pruned.step.kind === "matchWindow" ? pruned.step.deadlineAt : now);
-  return { ok: true, state: closed.state, events: closed.events };
+      const closed = closeMatchWindow(pruned, pruned.step.deadlineAt);
+      return { ok: true, state: closed.state, events: closed.events };
     }
     case "awaitPeek": {
       const deadline = pruned.step.deadlineAt;
       if (deadline === null || now < deadline) return null;
-  const after = afterPeekPhase(pruned, now);
-  return { ok: true, state: after.state, events: after.events };
+      const after = afterPeekPhase(pruned, now);
+      return { ok: true, state: after.state, events: after.events };
     }
     case "awaitQueenSwap": {
       const deadline = pruned.step.deadlineAt;
@@ -231,7 +231,12 @@ function handlePeek(
     ...entry,
     peekTokens: entry.peekTokens - 1,
   }));
-  const reveal: Reveal = { playerId: actor, cardIndex, until: ctx.now + REVEAL_MS };
+  const reveal: Reveal = {
+    playerId: actor,
+    cardIndex,
+    cardId: player.grid[cardIndex].id,
+    until: ctx.now + REVEAL_MS,
+  };
   const next: GameState = {
     ...state,
     players,
@@ -249,8 +254,8 @@ function handlePeek(
   }
 
   if (players.every((entry) => entry.peekTokens === 0)) {
-  const after = afterPeekPhase(next, ctx.now);
-  return { ok: true, state: after.state, events: events.concat(after.events) };
+    const after = afterPeekPhase(next, ctx.now);
+    return { ok: true, state: after.state, events: [...events, ...after.events] };
   }
   return { ok: true, state: next, events };
 }
@@ -412,7 +417,7 @@ function handleBurn(
     if (grid.length === 0) {
       const over = endGame(next);
       if (!over.ok) return over;
-      return { ok: true, state: over.state, events: events.concat(over.events) };
+      return { ok: true, state: over.state, events: [...events, ...over.events] };
     }
 
     return { ok: true, state: next, events };
@@ -445,12 +450,12 @@ function handleBurn(
 
   if (next.burnableBy.length === 0) {
     const closed = closeMatchWindow(next, ctx.now);
-    return { ok: true, state: closed.state, events: events.concat(closed.events) };
+    return { ok: true, state: closed.state, events: [...events, ...closed.events] };
   }
   return { ok: true, state: next, events };
 }
 
-function handleDutchCall(state: GameState, actor: PlayerId, _ctx: Ctx): ApplyResult {
+function handleDutchCall(state: GameState, actor: PlayerId): ApplyResult {
   if (state.step.kind !== "turnStart") {
     return {
       ok: false,
@@ -473,13 +478,8 @@ function handleDutchCall(state: GameState, actor: PlayerId, _ctx: Ctx): ApplyRes
 
   const next: GameState = { ...state, dutchCallerId: actor, burnableBy: [] };
   const advanced = advanceTurn(next);
-  return {
-    ok: true,
-    state: advanced.state,
-    events: ([{ type: "dutchCalled" as const, playerId: actor }] as GameEvent[]).concat(
-      advanced.events,
-    ),
-  };
+  const events: GameEvent[] = [{ type: "dutchCalled", playerId: actor }, ...advanced.events];
+  return { ok: true, state: advanced.state, events };
 }
 
 function handleQueenSwap(
@@ -487,7 +487,6 @@ function handleQueenSwap(
   actor: PlayerId,
   a: Target,
   b: Target,
-  ctx: Ctx,
 ): ApplyResult {
   if (state.step.kind !== "awaitQueenSwap") {
     return { ok: false, error: gameError("WRONG_PHASE", "There is no queen swap to make.") };
@@ -518,12 +517,12 @@ function handleQueenSwap(
   const swapped = swapGridCards(players, a, b);
 
   const next: GameState = { ...state, players: swapped };
-  const after = afterQueenResolved(next, ctx.now);
+  const after = afterQueenResolved(next);
   const events: GameEvent[] = [{ type: "queenSwapped", a, b }, ...after.events];
   return { ok: true, state: after.state, events };
 }
 
-function handleDeclineQueen(state: GameState, actor: PlayerId, ctx: Ctx): ApplyResult {
+function handleDeclineQueen(state: GameState, actor: PlayerId): ApplyResult {
   if (state.step.kind !== "awaitQueenSwap") {
     return { ok: false, error: gameError("WRONG_PHASE", "There is no queen swap to decline.") };
   }
@@ -546,7 +545,7 @@ function handleDeclineQueen(state: GameState, actor: PlayerId, ctx: Ctx): ApplyR
     queenTokens: entry.queenTokens - 1,
   }));
   const next: GameState = { ...state, players };
-  const after = afterQueenResolved(next, ctx.now);
+  const after = afterQueenResolved(next);
   return { ok: true, state: after.state, events: after.events };
 }
 
@@ -660,7 +659,7 @@ function afterPeekPhase(state: GameState, now: number): {
 }
 
 /** Moves the queen swap to the next token holder, or ends the phase. */
-function afterQueenResolved(state: GameState, now: number): {
+function afterQueenResolved(state: GameState): {
   state: GameState;
   events: GameEvent[];
 } {

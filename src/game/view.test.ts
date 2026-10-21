@@ -46,8 +46,8 @@ describe("view projection (plan §4.4)", () => {
     const state = makeFixture({
       grids: [[card("5", "S")], [card("6", "H")]],
       reveals: [
-        { playerId: "p0", cardIndex: 0, until: START + 8_000 },
-        { playerId: "p1", cardIndex: 0, until: START + 8_000 },
+        { playerId: "p0", cardIndex: 0, cardId: "d0-S-5", until: START + 8_000 },
+        { playerId: "p1", cardIndex: 0, cardId: "d0-H-6", until: START + 8_000 },
       ],
     });
     const mine = projectView(state, "p0", START);
@@ -62,9 +62,25 @@ describe("view projection (plan §4.4)", () => {
   it("drops a reveal once it expired", () => {
     const state = makeFixture({
       grids: [[card("5", "S")], [card("6", "H")]],
-      reveals: [{ playerId: "p0", cardIndex: 0, until: START + 8_000 }],
+      reveals: [{ playerId: "p0", cardIndex: 0, cardId: "d0-S-5", until: START + 8_000 }],
     });
     const view = projectView(state, "p0", START + 8_001);
+    expect(view.myGrid[0].revealed).toBeNull();
+    expect(view.myGrid[0].revealedUntil).toBeNull();
+  });
+
+  it("kills a reveal when a queen swap replaces the card in that slot", () => {
+    const state = makeFixture({
+      grids: [[card("5", "S")], [card("6", "H")]],
+      reveals: [{ playerId: "p0", cardIndex: 0, cardId: "d0-S-5", until: START + 8_000 }],
+    });
+    const swapped = {
+      ...state,
+      players: state.players.map((player) =>
+        player.id === "p0" ? { ...player, grid: [card("10", "D")] } : player,
+      ),
+    };
+    const view = projectView(swapped, "p0", START + 1_000);
     expect(view.myGrid[0].revealed).toBeNull();
     expect(view.myGrid[0].revealedUntil).toBeNull();
   });

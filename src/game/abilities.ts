@@ -38,23 +38,15 @@ export function findPlayer(players: PlayerState[], playerId: PlayerId): PlayerSt
 }
 
 /**
- * A queen swap is blind and cross-player (plan A9): two *different* players'
- * grids, one card each, positions preserved.
+ * A queen swap is blind and picks **any** two cards (PRD §5.4.4 / §6): the
+ * resolver's own grid and another player's grid, two other players' grids, or
+ * two cards of a single grid. One card each, positions preserved.
  */
 export function validateQueenSwap(
   players: PlayerState[],
   a: Target,
   b: Target,
 ): { ok: true } | { ok: false; error: GameError } {
-  if (a.playerId === b.playerId) {
-    return {
-      ok: false,
-      error: gameError(
-        "INVALID_TARGET",
-        "A queen swap must involve two different players.",
-      ),
-    };
-  }
   const playerA = findPlayer(players, a.playerId);
   const playerB = findPlayer(players, b.playerId);
   if (!playerA || !playerB) {
@@ -66,16 +58,38 @@ export function validateQueenSwap(
   if (!Number.isInteger(b.cardIndex) || b.cardIndex < 0 || b.cardIndex >= playerB.grid.length) {
     return { ok: false, error: gameError("OUT_OF_RANGE", "That card is not in the second grid.") };
   }
+  if (a.playerId === b.playerId && a.cardIndex === b.cardIndex) {
+    return {
+      ok: false,
+      error: gameError("INVALID_TARGET", "A card cannot be swapped with itself."),
+    };
+  }
   return { ok: true };
 }
 
-/** Swaps two cards between two players' grids. Both cards stay face down. */
+/**
+ * Swaps two cards. Both cards stay face down.
+ *
+ * The two targets may live in the same grid (both slots are rewritten) or in
+ * two different grids (one slot each).
+ */
 export function swapGridCards(players: PlayerState[], a: Target, b: Target): PlayerState[] {
   const playerA = findPlayer(players, a.playerId);
   const playerB = findPlayer(players, b.playerId);
   if (!playerA || !playerB) return players;
   const cardA = playerA.grid[a.cardIndex];
   const cardB = playerB.grid[b.cardIndex];
+
+  if (a.playerId === b.playerId) {
+    return players.map((player) => {
+      if (player.id !== a.playerId) return player;
+      const grid = player.grid.slice();
+      grid[a.cardIndex] = cardB;
+      grid[b.cardIndex] = cardA;
+      return { ...player, grid };
+    });
+  }
+
   return players.map((player) => {
     if (player.id === a.playerId) {
       const grid = player.grid.slice();

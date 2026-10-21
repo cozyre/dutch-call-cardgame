@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyTimeout } from "./engine";
+import { projectView } from "./view";
 import type { Action, GameState, PlayerId } from "./types";
 import {
   act,
@@ -455,7 +456,19 @@ describe("the queen", () => {
     expect(after.reveals).toHaveLength(0);
   });
 
-  it("refuses a swap inside one grid", () => {
+  it("swaps two cards of the same grid and keeps every card", () => {
+    const before = queenState();
+    const after = step(
+      before,
+      { type: "queenSwap", a: { playerId: "p0", cardIndex: 0 }, b: { playerId: "p0", cardIndex: 1 } },
+      "p0",
+    );
+    expect(after.players[0].grid.map((entry) => entry.id)).toEqual(["d0-H-2", "d0-S-Q"]);
+    expect(after.players[0].queenTokens).toBe(0);
+    expect(allIds(after).sort()).toEqual(allIds(before).sort());
+  });
+
+  it("refuses to swap a card with itself", () => {
     expect(
       expectError(
         act(
@@ -463,7 +476,7 @@ describe("the queen", () => {
           {
             type: "queenSwap",
             a: { playerId: "p0", cardIndex: 0 },
-            b: { playerId: "p0", cardIndex: 1 },
+            b: { playerId: "p0", cardIndex: 0 },
           },
           "p0",
           START,
@@ -527,6 +540,31 @@ describe("the queen", () => {
     const after = timeout(state, START + 31_000);
     expect(after.step.kind).toBe("turnStart");
     expect(after.players[0].queenTokens).toBe(0);
+  });
+
+  it("kills a peeked reveal when the queen swap replaces the card", () => {
+    const state = makeFixture({
+      grids: [
+        gridOf(card("Q", "S"), card("2", "H")),
+        gridOf(card("3", "C"), card("4", "D")),
+        gridOf(card("5", "S")),
+      ],
+      drawPile: [card("9", "C")],
+      step: { kind: "awaitPeek", deadlineAt: START + 30_000 },
+      peekTokens: [1, 0, 0],
+      queenTokens: [1, 0, 0],
+    });
+    const peeked = step(state, { type: "peek", cardIndex: 0 }, "p0");
+    expect(peeked.step.kind).toBe("awaitQueenSwap");
+    expect(projectView(peeked, "p0", START + 1).myGrid[0].revealed?.rank).toBe("Q");
+
+    const swapped = step(
+      peeked,
+      { type: "queenSwap", a: { playerId: "p0", cardIndex: 0 }, b: { playerId: "p1", cardIndex: 0 } },
+      "p0",
+    );
+    expect(swapped.players[0].grid[0].id).toBe("d0-C-3");
+    expect(projectView(swapped, "p0", START + 2).myGrid[0].revealed).toBeNull();
   });
 });
 
