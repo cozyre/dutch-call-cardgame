@@ -55,10 +55,10 @@ export type Step =
   | { kind: "lobby" }
   | { kind: "setupPeek"; deadlineAt: number | null }
   | { kind: "turnStart" }
-  | { kind: "awaitChoice"; drawn: Card; deadlineAt: number }
+  | { kind: "awaitChoice"; drawn: Card; deadlineAt: number; selectedIndex: number | null }
   | { kind: "matchWindow"; rank: Rank; deadlineAt: number }
   | { kind: "awaitPeek"; deadlineAt: number | null }
-  | { kind: "awaitQueenSwap"; deadlineAt: number | null }
+  | { kind: "awaitQueenSwap"; deadlineAt: number | null; resolverId: PlayerId | null }
   | { kind: "gameOver" };
 
 export interface GameState {
@@ -71,11 +71,17 @@ export interface GameState {
   discardPile: Card[]; // last element = top
   dutchCallerId: PlayerId | null;
   burnableBy: PlayerId[]; // players still allowed to burn in the open window
-  reveals: Reveal[]; // time-limited card reveals
+  reveals: Reveal[]; // time-limited card reveals (see §4.4)
+  batchPeeks: BatchPeek[]; // cards peeked in the current ability batch
   rngSeed: number;
   rngState: number;
   startedAt: number;
   result: Standing[] | null;
+}
+
+export interface BatchPeek {
+  playerId: PlayerId;
+  cardIndex: number;
 }
 
 export interface Reveal {
@@ -102,6 +108,7 @@ export interface Target {
 export type Action =
   | { type: "startGame" }
   | { type: "peek"; cardIndex: number }
+  | { type: "selectCard"; cardIndex: number }
   | { type: "draw" }
   | { type: "discardDrawn" }
   | { type: "swapDrawn"; cardIndex: number }
@@ -148,6 +155,7 @@ export interface GameView {
     cardCount: number;
   }[];
   myGrid: GridCardView[];
+  drawnCard: { rank: Rank; suit: Suit; value: number } | null;
   matchWindow: { rank: Rank; deadlineAt: number } | null;
   canBurn: boolean;
   canDraw: boolean;
