@@ -520,6 +520,7 @@ game:error   { code, message }
 - **Lobby** (`src/app/room/[code]/`): player list with connection dots, room code with copy button, copy-link button, host-only settings panel (5 preset radio buttons + Custom with numeric inputs and inline validation errors), Start button (host only; enabled at 3–6 players), "waiting on X" indicators.
 - **Resume**: on load, if a seat token for that code exists in `localStorage`, attempt `room:resume` first and skip the join form.
 - Copy UX: `navigator.clipboard.writeText`, with a "Copied" confirmation.
+- **Design**: build these against the Figma file — Home `3:79` (mobile) / `5:2` (desktop), Lobby (host) `3:125` / `5:74`. The tokens, components and copy rules live in `AGENTS.md` → "UI/UX design system"; Figma is the contract, so re-read the frame before writing the component.
 
 **Exit criteria:** create → 2 tabs join → host starts → both land on the game screen with a live lobby view; a refresh resumes the seat.
 
@@ -538,11 +539,12 @@ Layout:
 - **Queen swap UI**: pick a card from one player's grid, then a card from another's; confirm/cancel.
 - **Dutch Call button**: enabled only when `canDutchCall` (turn start + exactly 1 card). Confirmation dialog explaining the consequences.
 - **Connection banner**: disconnected → "Reconnecting…", with a 60s countdown to seat forfeiture.
+- **Design**: mobile board `4:61` (your turn, drawn card) and `4:187` (match window); desktop board `5:351`. Mobile: opponents scroll horizontally, action sheet pinned to the bottom. Desktop: a **360 px turn sidebar on the right**, opponents across the top, your cards at the bottom. Card grid caps at 4 rows × 5 columns (`columns = ceil(cards / rows)`); your grid uses L/M cards, opponents S.
 
 **Card components** (`src/components/card/`) — build these in parallel with Phase 1:
 - `CardFace` — SVG per rank/suit. Pip layouts for 2–10, and distinct artwork/letterforms for A/J/Q/K. Red for hearts/diamonds, black for spades/clubs. Corner indices top-left + bottom-right (rotated).
-- `CardBack` — one uniform SVG back.
-- Sizes via a `size` prop; all vector.
+- `CardBack` — one uniform SVG back. The design's card back is a *tile* back (Delft blue with a lighter inner border and a centred motif), drawn in-repo as SVG — keep it an in-repo vector, no external assets.
+- Sizes via a `size` prop; all vector. The design's sizes are S 44×62, M 64×90, L 92×130.
 
 **Client architecture** — code against a `GameClient` interface so the UI can be built without the live server:
 ```ts
@@ -567,6 +569,7 @@ Implementations: `SocketGameClient` (real) and `LocalGameClient` (in-process eng
 - Every player's grid revealed face-up.
 - Co-winner indication on ties.
 - Host-only "Play again" (fresh room, same players, new deal).
+- **Design**: mobile results `3:187`, desktop results `5:160`.
 
 ---
 
@@ -634,6 +637,7 @@ Accounts · login · chat/voice · spectator mode · AI/bot players as participa
 17. **A wrong burn discloses nothing.** The burned card goes back to its slot face down; the `burned` event carries `rank: null`. Do not "helpfully" include the rank — that leaks a card to every client in the room.
 18. **A client may act on a stale view.** The server must refuse such an action (`WRONG_PHASE`, `NOT_YOUR_TURN`) rather than apply it. A refusal is correct behaviour, not a bug — do not weaken the engine's phase checks to "avoid" them.
 19. **A forfeited seat is only removed from the game state at a safe step boundary.** Removing a player mid-turn corrupts the turn order; `src/game/roster.ts` defers the removal until `turnStart` or `setupPeek`.
+20. **Never invent UI.** The Figma file ("Dutch Call – UI/UX Design (Mobile + Desktop)", key `z6RIAsrYU0eNdaC62WaCa9`) is the design contract; its tokens are mirrored in `AGENTS.md` → "UI/UX design system". No new colours, fonts, radii, spacing steps or layouts; orange marks the active turn and the one action that advances it, and nothing else. If the mirror and Figma disagree, Figma wins and `AGENTS.md` gets fixed in the same change.
 
 ---
 

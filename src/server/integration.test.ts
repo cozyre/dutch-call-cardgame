@@ -327,6 +327,24 @@ describe("server enforcement", () => {
     for (const bot of bots) bot.close();
   });
 
+  it("returns field-level errors for impossible custom settings", async () => {
+    const bots = await threeBots(false);
+    const code = await seatThree(bots);
+
+    bots[0].socket.emit("room:settings", {
+      settings: { cardsPerPlayer: 20, deckCount: 1, preset: "custom" },
+    });
+    await bots[0].waitFor(() => bots[0].settingsErrors.length > 0);
+
+    expect(bots[0].settingsErrors[0].field).toBe("pile");
+    // The rejected settings never reach the room.
+    expect(roomOf(code).settings.preset).toBe("normal");
+    // Inline validation is not also reported as a generic game error.
+    expect(bots[0].errors).toEqual([]);
+
+    for (const bot of bots) bot.close();
+  });
+
   it("rejects a move from a player whose turn it is not", async () => {
     const bots = await threeBots(false);
     const code = await seatThree(bots);

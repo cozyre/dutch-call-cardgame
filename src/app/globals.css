@@ -1,26 +1,85 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * Design tokens — mirror of the Figma `Foundations` frame (2:83) in
+ * "Dutch Call – UI/UX Design". If this file and Figma disagree, Figma wins
+ * and this file is corrected in the same change.
+ */
+@theme {
+  /* colours — one orange action colour on a Delft-tile blue table */
+  --color-ink: #0e1b45;
+  --color-raised: #182f78;
+  --color-delft: #2349a8;
+  --color-delft-light: #3f66c9;
+  --color-tile: #f5f7fd;
+  --color-tile-dim: #dce3f5;
+  --color-glaze: #a9bceb;
+  --color-oranje: #ff7a1a;
+  --color-suit-red: #d6303f;
+  --color-success: #3fcf9b;
+  --color-danger: #ff5c6c;
+
+  /* radius */
+  --radius-card: 10px;
+  --radius-input: 14px;
+  --radius-panel: 20px;
+  --radius-pill: 999px;
+
+  /* type families */
+  --font-ui: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-fraunces), ui-serif, Georgia, serif;
+
+  /* type scale */
+  --text-display-xl: 64px;
+  --text-display-xl--line-height: 68px;
+  --text-display-xl--letter-spacing: -2px;
+  --text-display-xl--font-weight: 800;
+
+  --text-display-l: 40px;
+  --text-display-l--line-height: 44px;
+  --text-display-l--font-weight: 800;
+
+  --text-h1: 28px;
+  --text-h1--line-height: 34px;
+  --text-h1--font-weight: 700;
+
+  --text-h2: 20px;
+  --text-h2--line-height: 26px;
+  --text-h2--font-weight: 600;
+
+  --text-body: 16px;
+  --text-body--line-height: 24px;
+  --text-body--font-weight: 400;
+
+  --text-label: 14px;
+  --text-label--line-height: 20px;
+  --text-label--font-weight: 500;
+
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+  --text-caption--font-weight: 500;
+
+  --text-code-room: 52px;
+  --text-code-room--line-height: 56px;
+  --text-code-room--letter-spacing: 4px;
+  --text-code-room--font-weight: 800;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  min-height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-ink);
+  color: var(--color-tile);
+  font-family: var(--font-ui);
+  /* The desktop hero's Delft ellipse deliberately runs past the 1200 px
+     content rail; never let it create a horizontal scrollbar. */
+  overflow-x: clip;
+}
+
+::selection {
+  background-color: var(--color-oranje);
+  color: var(--color-ink);
 }

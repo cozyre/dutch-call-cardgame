@@ -48,6 +48,15 @@ describe("creating a room", () => {
     expect(view?.players[0]).toMatchObject({ name: "Ada", seat: 0, isHost: true });
     expect(view?.canStart).toBe(false);
     expect(view?.canConfigure).toBe(true);
+    expect(view?.youId).toBe(created.value.playerId);
+  });
+
+  it("does not attribute a viewer when the lobby is anonymous", () => {
+    const rooms = manager();
+    const created = rooms.createRoom("Ada");
+    if (!created.ok) throw new Error("create failed");
+    const view = rooms.lobbyView(created.value.code);
+    expect(view?.youId).toBeNull();
   });
 
   it("uses the default settings when none are given", () => {

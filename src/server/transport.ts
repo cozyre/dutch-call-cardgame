@@ -1,6 +1,7 @@
 import type { Server, Socket } from "socket.io";
 import type { Action, GameEvent } from "../game/types";
 import { applyAction } from "../game/engine";
+import { validateCustomSettings } from "../game/difficulty";
 import { projectView } from "../game/view";
 import { ActionSchema, ClientMessageSchema, type ClientMessage } from "./protocol";
 import type { Room, RoomManager } from "./rooms";
@@ -118,6 +119,21 @@ export function setupTransport(ctx: TransportContext): void {
       }
       const updated = rooms.updateSettings(seat.code, seat.playerId, message.settings);
       if (!updated.ok) {
+        // Field-level errors let the host render inline validation (plan §8).
+        if (updated.error.code === "INVALID_SETTINGS") {
+          const room = rooms.get(seat.code);
+          if (room) {
+            const validation = validateCustomSettings(
+              message.settings.cardsPerPlayer,
+              message.settings.deckCount,
+              room.players.length,
+            );
+            if (!validation.ok) {
+              socket.emit("room:settings-error", { errors: validation.errors });
+              return;
+            }
+          }
+        }
         socket.emit("game:error", updated.error);
         return;
       }
@@ -331,6 +347,7 @@ function emptyLobby(code: string) {
     canStart: false,
     canConfigure: false,
     hostId: null,
+    youId: null,
   };
 }
 

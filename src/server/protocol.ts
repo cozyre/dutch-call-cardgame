@@ -144,6 +144,8 @@ export interface LobbyView {
   /** The host may edit the settings while the game has not started. */
   canConfigure: boolean;
   hostId: string | null;
+  /** The viewer's own player id, so the lobby can mark their seat. */
+  youId: string | null;
 }
 
 export interface RoomCreatedPayload {

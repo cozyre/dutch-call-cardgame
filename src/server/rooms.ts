@@ -330,6 +330,7 @@ export class RoomManager {
       canStart: players.length >= MIN_PLAYERS && players.length <= MAX_PLAYERS,
       canConfigure: viewer ? viewer.isHost && !room.state : false,
       hostId: host ? host.id : null,
+      youId: viewer ? viewer.id : null,
     };
   }
 

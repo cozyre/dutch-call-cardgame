@@ -1,5 +1,6 @@
 import { io, type Socket } from "socket.io-client";
 import type { Action, GameEvent, GameSettings, GameView } from "../game/types";
+import type { SettingsError } from "../game/difficulty";
 import type { LobbyView } from "./protocol";
 
 /**
@@ -40,6 +41,7 @@ export class Bot {
     step?: string | null;
   }[] = [];
   events: GameEvent[] = [];
+  settingsErrors: SettingsError[] = [];
   /** Every raw payload this client received — used by the leak tests. */
   readonly raw: unknown[] = [];
 
@@ -87,6 +89,10 @@ export class Bot {
     this.socket.on("game:event", (payload: { event: GameEvent }) => {
       this.raw.push(payload);
       this.events.push(payload.event);
+    });
+    this.socket.on("room:settings-error", (payload: { errors: SettingsError[] }) => {
+      this.raw.push(payload);
+      this.settingsErrors = payload.errors;
     });
   }
 
