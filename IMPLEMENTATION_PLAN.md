@@ -56,16 +56,19 @@ src/
     abilities.ts           Jack / Queen resolution
     scoring.ts             tally, standings, winner
     view.ts                projectView() — the anti-cheat boundary
+    roster.ts              connection sync, seat removal at a safe step boundary
     errors.ts              GameError codes
     <module>.test.ts       vitest, colocated
 
   server/                  long-lived Node process (own entrypoint)
     index.ts               bootstrap + graceful shutdown
+    app.ts                 createGameServer() — composable server (tests, scripts)
     rooms.ts               RoomManager: create / join / leave / reconnect / forfeit
     session.ts             connection → seat binding, seat tokens
     transport.ts           Socket.io adapter
     timers.ts              deadline sweeper
     protocol.ts            wire message types (zod-validated)
+    bots.ts                headless bot client (tests + simulation)
 
   app/                     Next.js App Router — frontend only
     page.tsx               Home
@@ -217,7 +220,7 @@ export type GameEvent =
   | { type: "gameStarted" }
   | { type: "cardDrawn"; playerId: PlayerId }
   | { type: "cardDiscarded"; playerId: PlayerId; rank: Rank; suit: Suit }  // face-up → discard
-  | { type: "burned"; playerId: PlayerId; rank: Rank; correct: boolean }
+  | { type: "burned"; playerId: PlayerId; rank: Rank | null; correct: boolean }
   | { type: "penaltyAdded"; playerId: PlayerId }
   | { type: "abilityGranted"; kind: "jack" | "queen"; playerId: PlayerId }
   | { type: "peeked"; playerId: PlayerId; cardIndex: number }
@@ -228,6 +231,8 @@ export type GameEvent =
 ```
 
 Events are for animations/toasts only. **Clients must never reconstruct state from events** — the view is the state.
+
+> **Amendment (Phase 2).** `burned.rank` is `Rank | null`. A *correct* burn names the rank (the card goes face-up onto the discard pile, so it is public). A *wrong* burn reports `rank: null`: the card returns face down to its slot and nobody — not even the player who burned it — may learn its value. The first implementation used `Rank` here and leaked the burned card to every client; the server now emits `null` and the leak test in `src/server/integration.test.ts` asserts it.
 
 ### 4.4 View projection — the anti-cheat boundary
 
@@ -251,6 +256,7 @@ export interface GameView {
   canDutchCall: boolean;
   myPeekTokens: number;
   myQueenTokens: number;
+  queenResolverId: PlayerId | null;
   dutchCallerId: PlayerId | null;
   result: Standing[] | null;
 }
@@ -261,6 +267,8 @@ export interface GridCardView {
   revealedUntil: number | null;
 }
 ```
+
+> **Amendment (Phase 2).** `queenResolverId` was added: during `awaitQueenSwap` it names the player who must resolve the swap now. Without it the UI would have to guess whose turn it is to answer the "swap two cards?" prompt. It is `null` in every other step.
 
 ```ts
 export function projectView(state: GameState, playerId: PlayerId, now: number): GameView;
@@ -452,16 +460,22 @@ Play N (default 1000) random-but-legal games with a seeded RNG and a trivial pol
 
 ## 7. Phase 2 — Authoritative game server
 
+> **Status: done.** Implemented in `src/server/{protocol,session,rooms,transport,timers,app,index,bots}.ts` plus `src/game/roster.ts`; tested by `src/server/{protocol,rooms,integration}.test.ts` and `scripts/simulate.ts`. The amendments below are the contracts as built.
+
 **`src/server/protocol.ts`** — zod schemas for both directions.
 
 Client → server:
 ```
 room:create  { name, settings? }          → room:created  { code, seatToken }
-room:join    { code, name }                → room:joined   { code, seatToken, view }
-room:resume  { code, seatToken }           → room:joined   { code, seatToken, view }
+room:join    { code, name }                → room:joined   { code, seatToken, lobby }
+room:resume  { code, seatToken }           → room:joined   { code, seatToken, lobby }
+room:settings{ settings }                  → room:state    { lobby }
+room:leave   { }                           → (seat is forfeited)
 game:action  { action }                    → game:error    { code, message } (on rejection)
 ping                                          → pong
 ```
+
+> **Amendment (Phase 2).** Two messages were added to the list above: `room:settings` (the host edits the difficulty before the game starts) and `room:leave` (a player leaves the table on purpose instead of dropping the connection). Every inbound message is validated with a **strict** schema: an unknown key is a rejection, not a silent strip, because a client that tries to report a card value is a client that is trying to cheat. The socket.io event name carries the message type and is re-attached *after* the payload spread, so a client cannot spoof the type either.
 
 Server → client:
 ```
@@ -485,9 +499,13 @@ game:error   { code, message }
 
 **`src/server/timers.ts`** — a single sweep interval (e.g. every 500ms) that calls `applyTimeout` for rooms whose `deadlineAt` has passed, then rebroadcasts. Deadlines: 30s draw decision, 30s match window, 30s setup peek, 60s reconnect grace.
 
+**`src/game/roster.ts`** — pure helpers for the roster edge cases: `syncConnections`, `removePlayerFromState` (a forfeited seat is only removed from the game state at a safe step boundary — `turnStart` or `setupPeek` — so a half-played turn is never corrupted) and `playersBySeat`.
+
 **`scripts/simulate.ts`** — bot clients over the real socket:
 - Policy: always burn if a matching card is known (bots cheat by reading their own grid from the server's truth — acceptable for a test harness), else discard the drawn card, else swap the highest-value card.
 - Asserts: no crashes, every game reaches `gameOver`, no illegal action ever succeeds.
+
+> **Amendment (Phase 2).** The simulation shortens the server's deadlines so a whole game runs in about two seconds. A bot that acts on a view which has already gone stale gets its action refused (`WRONG_PHASE`, `NOT_YOUR_TURN`, `NOT_ALLOWED`); that refusal **is** the assertion the plan asks for ("no illegal action ever succeeds"), so the simulation counts those refusals instead of failing on them. Any other error code, a game that does not finish, or a card identity that reached a client without being public fails the run.
 
 **Exit criteria**
 - Two headless clients complete a full game over sockets.
@@ -613,6 +631,9 @@ Accounts · login · chat/voice · spectator mode · AI/bot players as participa
 14. **A reveal binds to a card, not to a slot.** If the card occupying a revealed slot is replaced before the reveal expires (a queen swap, a swap-draw), the reveal must die — otherwise the player is shown the value of a card they never peeked at.
 15. **`selectCard` carries an index, not a card.** It is the PRD §10 "I chose Swap but went idle" pre-selection; the server completes the swap on expiry.
 16. **A queen swap may pick any two cards** — including two cards of the same grid. When both targets sit in one grid, both slots must be rewritten, or a card is silently lost and card conservation breaks.
+17. **A wrong burn discloses nothing.** The burned card goes back to its slot face down; the `burned` event carries `rank: null`. Do not "helpfully" include the rank — that leaks a card to every client in the room.
+18. **A client may act on a stale view.** The server must refuse such an action (`WRONG_PHASE`, `NOT_YOUR_TURN`) rather than apply it. A refusal is correct behaviour, not a bug — do not weaken the engine's phase checks to "avoid" them.
+19. **A forfeited seat is only removed from the game state at a safe step boundary.** Removing a player mid-turn corrupts the turn order; `src/game/roster.ts` defers the removal until `turnStart` or `setupPeek`.
 
 ---
 

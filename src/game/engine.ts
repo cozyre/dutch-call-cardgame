@@ -425,8 +425,10 @@ function handleBurn(
 
   // Wrong burn: the card returns face down to its original slot and the
   // player takes one penalty card from the top of the center pile (plan A3).
+  // The burned card's identity is never disclosed — it goes back into the
+  // grid face down, so nobody (not even the burner) may learn its value.
   const events: GameEvent[] = [
-    { type: "burned", playerId: actor, rank: card.rank, correct: false },
+    { type: "burned", playerId: actor, rank: null, correct: false },
   ];
   let players = state.players;
   let drawPile = state.drawPile;
@@ -585,7 +587,8 @@ function openMatchWindow(rank: Rank, ctx: Ctx): GameState["step"] {
   };
 }
 
-function beginFirstTurn(state: GameState): GameState {
+/** Starts the first turn: every peek token is spent, the host draws first. */
+export function beginFirstTurn(state: GameState): GameState {
   const players = state.players.map((player) => ({ ...player, peekTokens: 0 }));
   return {
     ...state,

@@ -124,7 +124,11 @@ export type GameEvent =
   | { type: "gameStarted" }
   | { type: "cardDrawn"; playerId: PlayerId }
   | { type: "cardDiscarded"; playerId: PlayerId; rank: Rank; suit: Suit }
-  | { type: "burned"; playerId: PlayerId; rank: Rank; correct: boolean }
+  // `rank` is only disclosed for a correct burn: that card goes face-up on
+  // the discard pile, so it is public. A wrong burn returns the card
+  // face-down to its slot, so its identity must stay hidden from every
+  // client, including the player who burned it.
+  | { type: "burned"; playerId: PlayerId; rank: Rank | null; correct: boolean }
   | { type: "penaltyAdded"; playerId: PlayerId }
   | { type: "abilityGranted"; kind: "jack" | "queen"; playerId: PlayerId }
   | { type: "peeked"; playerId: PlayerId; cardIndex: number }
@@ -165,6 +169,8 @@ export interface GameView {
   canDutchCall: boolean;
   myPeekTokens: number;
   myQueenTokens: number;
+  /** The player whose queen token is being resolved right now, if any. */
+  queenResolverId: PlayerId | null;
   dutchCallerId: PlayerId | null;
   result: Standing[] | null;
 }

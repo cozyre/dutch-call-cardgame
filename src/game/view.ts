@@ -82,6 +82,7 @@ export function projectView(state: GameState, playerId: PlayerId, now: number): 
       state.dutchCallerId === null,
     myPeekTokens: me?.peekTokens ?? 0,
     myQueenTokens: me?.queenTokens ?? 0,
+    queenResolverId: step.kind === "awaitQueenSwap" ? step.resolverId : null,
     dutchCallerId: state.dutchCallerId,
     result: state.result,
   };

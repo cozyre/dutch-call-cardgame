@@ -1,35 +1,42 @@
-import { createServer } from "node:http";
-import { Server } from "socket.io";
+import { createGameServer } from "./app";
 import { GAME_SERVER_PORT, NEXT_ORIGIN } from "../lib/env";
 
-const httpServer = createServer();
+/**
+ * Bootstrap for the standalone game server process.
+ *
+ * The Next.js app is the frontend only; all game state lives in this
+ * process's memory.
+ */
 
-const io = new Server(httpServer, {
-  cors: {
-    origin: [NEXT_ORIGIN, "http://localhost:3000", "http://127.0.0.1:3000"],
-    methods: ["GET", "POST"],
-  },
+const server = createGameServer({
+  port: GAME_SERVER_PORT,
+  corsOrigin: [
+    NEXT_ORIGIN,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+  ],
 });
 
-io.on("connection", (socket) => {
-  socket.emit("server:hello", { port: GAME_SERVER_PORT });
-
-  socket.on("ping", (payload: unknown) => {
-    socket.emit("pong", payload ?? null);
+server
+  .listen(GAME_SERVER_PORT)
+  .then((port) => {
+    console.log(`[game-server] listening on http://localhost:${port}`);
+  })
+  .catch((error: unknown) => {
+    console.error("[game-server] failed to start", error);
+    process.exit(1);
   });
-});
 
-httpServer.listen(GAME_SERVER_PORT, () => {
-  console.log(`[game-server] listening on http://localhost:${GAME_SERVER_PORT}`);
-});
+let shuttingDown = false;
 
 function shutdown(signal: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
   console.log(`[game-server] ${signal} received, shutting down`);
-  io.close(() => {
-    httpServer.close(() => {
-      process.exit(0);
-    });
-  });
+  server
+    .close()
+    .then(() => process.exit(0))
+    .catch(() => process.exit(1));
   setTimeout(() => process.exit(0), 5000).unref();
 }
 
