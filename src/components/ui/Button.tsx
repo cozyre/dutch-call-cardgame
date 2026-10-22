@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/format";
 
-type ButtonVariant = "primary" | "secondary" | "ghost";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "accent";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -13,6 +13,8 @@ const VARIANTS: Record<ButtonVariant, string> = {
   primary: "bg-oranje text-ink hover:brightness-105 active:brightness-95",
   secondary: "border-[1.5px] border-tile text-tile hover:bg-tile/5",
   ghost: "text-glaze hover:text-tile",
+  accent:
+    "border-[1.5px] border-oranje text-oranje hover:bg-oranje/10 active:bg-oranje/20",
 };
 
 /**

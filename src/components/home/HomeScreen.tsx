@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { CardBack } from "@/components/card/CardBack";
 import { CardFace } from "@/components/card/CardFace";
+import { HowToPlayButton } from "@/components/help/HowToPlayButton";
 import { getGameClient } from "@/lib/client/socket-client";
 import { loadPlayerName, savePlayerName } from "@/lib/client/storage";
 import { normaliseRoomCode } from "@/lib/format";
@@ -77,17 +79,28 @@ export function HomeScreen({ initialRoomCode = "" }: HomeScreenProps) {
   const busy = pending !== null;
 
   return (
-    <main className="relative mx-auto flex min-h-screen w-full max-w-[1200px] flex-col px-6 py-10 md:justify-center md:px-0 md:py-0">
+    <main className="relative mx-auto flex min-h-dvh w-full max-w-[1200px] flex-col px-6 py-10 md:items-center md:py-8 xl:items-start xl:px-0 min-[1440px]:py-0">
       <DesktopHero />
 
-      <div className="flex w-full flex-col md:w-[482px]">
-        <div className="lg:hidden">
+      <div className="flex w-full flex-col md:my-auto md:w-[482px]">
+        <div className="md:hidden">
           <CardFan />
         </div>
 
-        <h1 className="mt-5 text-[40px] font-extrabold leading-[44px] tracking-[-1px] text-tile md:-translate-y-1 md:text-display-xl md:leading-[68px] md:tracking-[-2px] lg:mt-0">
-          Dutch Call
-        </h1>
+        <div className="mt-5 flex items-center gap-3 md:mt-0 md:gap-4">
+          <Image
+            src="/logo.png"
+            alt=""
+            width={1254}
+            height={1254}
+            sizes="(min-width: 768px) 64px, 56px"
+            preload
+            className="h-14 w-14 shrink-0 md:h-16 md:w-16"
+          />
+          <h1 className="text-[40px] font-extrabold leading-[44px] tracking-[-1px] text-tile md:text-display-xl md:leading-[68px] md:tracking-[-2px]">
+            Dutch Call
+          </h1>
+        </div>
         <p className="mt-3 max-w-[342px] text-body text-glaze md:mt-2 md:max-w-[412px]">
           Swap, match and memorize. Get down to one card, then call it.
         </p>
@@ -151,6 +164,8 @@ export function HomeScreen({ initialRoomCode = "" }: HomeScreenProps) {
             </p>
           ) : null}
         </div>
+
+        <HowToPlayButton appearance="link" className="mt-3" />
       </div>
     </main>
   );
@@ -175,13 +190,15 @@ function CardFan() {
 
 /**
  * The desktop hero: a Delft-tile ellipse behind a five-card fan, with the
- * three scoring reminders beneath it (Figma Home desktop, 5:2).
+ * three scoring reminders beneath it (Figma Home desktop, 5:2). The fixed
+ * 748 px composition is drawn for 1440; between 1280–1439 it is scaled to
+ * 0.92 so the ellipse and cards never clip.
  */
 function DesktopHero() {
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 hidden lg:block"
+      className="pointer-events-none absolute inset-0 hidden xl:block xl:scale-[0.92] min-[1440px]:scale-100"
     >
       <div className="absolute left-[540px] top-[32px] h-[836px] w-[748px] rounded-full bg-delft" />
 

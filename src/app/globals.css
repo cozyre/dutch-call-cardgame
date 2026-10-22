@@ -83,3 +83,8 @@ body {
   background-color: var(--color-oranje);
   color: var(--color-ink);
 }
+
+.help-dialog::backdrop {
+  background-color: rgb(14 27 69 / 0.82);
+  background-color: color-mix(in srgb, var(--color-ink) 82%, transparent);
+}

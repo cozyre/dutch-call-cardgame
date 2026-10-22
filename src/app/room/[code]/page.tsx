@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Seat } from "@/components/ui/Seat";
 import { TextField } from "@/components/ui/TextField";
+import { HowToPlayButton } from "@/components/help/HowToPlayButton";
 import { LobbyFooter } from "@/components/lobby/LobbyFooter";
 import { LobbyHeader } from "@/components/lobby/LobbyHeader";
 import { PlayerList } from "@/components/lobby/PlayerList";
@@ -145,7 +146,7 @@ export default function RoomPage() {
     typeof window === "undefined" ? "" : `${window.location.origin}/?room=${code}`;
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-[1200px] px-6 pt-8 pb-10 md:px-0 md:pt-14">
+    <main className="mx-auto min-h-dvh w-full max-w-[1200px] px-6 pt-8 pb-10 md:px-0 md:pt-14">
       <LobbyHeader onLeave={onLeave} />
 
       {!lobby || lobby.youId === null || players.length === 0 ? (
@@ -226,13 +227,18 @@ function GameInProgress({ code, view }: { code: string; view: GameView }) {
   const turnPlayer = view.players.find((player) => player.id === view.turnPlayerId);
   const me = view.players.find((player) => player.id === view.youId);
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[1200px] flex-col px-6 py-8 md:px-10">
-      <header className="flex items-center justify-between gap-4">
+    <main className="mx-auto flex min-h-dvh w-full max-w-[1200px] flex-col px-6 py-8 md:px-10">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-label text-glaze">Room</p>
           <p className="text-h2 tracking-[4px] text-tile">{code}</p>
         </div>
-        <p className="text-label text-glaze">{me?.name}</p>
+        <div className="flex min-w-0 items-center gap-2">
+          <HowToPlayButton />
+          <p className="max-w-[40vw] truncate text-label text-glaze md:max-w-none">
+            {me?.name}
+          </p>
+        </div>
       </header>
 
       <section className="mt-10 rounded-panel bg-raised p-6 md:p-8">
