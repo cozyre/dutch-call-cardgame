@@ -218,11 +218,11 @@ function DesktopHero() {
         <CardBack size="L" className="h-full w-full" />
       </HeroCard>
 
-      <div className="absolute left-[540px] top-[656px] flex w-[748px] justify-center gap-11 text-label text-tile">
+      {/* <div className="absolute left-[540px] top-[656px] flex w-[748px] justify-center gap-11 text-label text-tile">
         <span>Black King = 0</span>
         <span>Red King = 13</span>
         <span>Jack, Queen = 10</span>
-      </div>
+      </div> */}
     </div>
   );
 }
