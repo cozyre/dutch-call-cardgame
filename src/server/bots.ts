@@ -43,7 +43,7 @@ export class Bot {
   events: GameEvent[] = [];
   settingsErrors: SettingsError[] = [];
   /** Every raw payload this client received — used by the leak tests. */
-  readonly raw: unknown[] = [];
+  raw: unknown[] = [];
 
   seatToken: string | null = null;
   code: string | null = null;
@@ -157,6 +157,35 @@ export class Bot {
   /** Leaves the table on purpose (not a connection drop). */
   leave(): void {
     this.socket.emit("room:leave", {});
+  }
+
+  /**
+   * Asks the host for the next game (Phase 5) and resolves with the
+   * fresh deal. A refusal rejects with the server's error.
+   */
+  rematch(): Promise<GameView> {
+    return new Promise((resolve, reject) => {
+      const onError = (payload: { code: string; message: string }) => reject(
+        new Error(`${payload.code}: ${payload.message}`),
+      );
+      this.socket.once("game:error", onError);
+      this.socket.emit("room:rematch", {});
+      this.waitForView((view) => view.phase === "playing").then(
+        (view) => {
+          this.socket.off("game:error", onError);
+          resolve(view);
+        },
+        (error: unknown) => {
+          this.socket.off("game:error", onError);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        },
+      );
+    });
+  }
+
+  /** Drops the recorded payloads — used by the leak tests between games. */
+  resetRaw(): void {
+    this.raw.length = 0;
   }
 
   close(): void {

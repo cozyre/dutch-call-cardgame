@@ -52,6 +52,8 @@ export function projectView(state: GameState, playerId: PlayerId, now: number): 
     turnPlayerId: state.phase === "over" ? null : (active?.id ?? null),
     deadlineAt: deadlineOf(step),
     drawPileCount: state.drawPile.length,
+    discardPileCount: state.discardPile.length,
+    serverNow: now,
     discardTop: discardTop
       ? { rank: discardTop.rank, suit: discardTop.suit, value: cardValue(discardTop) }
       : null,
@@ -62,6 +64,7 @@ export function projectView(state: GameState, playerId: PlayerId, now: number): 
       isHost: player.isHost,
       connected: player.connected,
       cardCount: player.grid.length,
+      disconnectedAt: player.disconnectedAt,
     })),
     myGrid,
     drawnCard,

@@ -182,6 +182,15 @@ export class SocketGameClient implements GameClient {
     this.lastView = null;
   }
 
+  /**
+   * Host-only "Play again" (plan §10). Fire-and-forget: the server refuses
+   * non-hosts, non-finished games and undersized rosters through the
+   * `game:error` handler, so nothing else is needed here.
+   */
+  rematch(): void {
+    this.socket.emit("room:rematch", {});
+  }
+
   send(action: Action): void {
     this.socket.emit("game:action", { action });
   }

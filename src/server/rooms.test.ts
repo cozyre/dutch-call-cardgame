@@ -3,6 +3,8 @@ import { RoomManager } from "./rooms";
 import { SeatTokenService } from "./session";
 import { allCardIds } from "../game/engine";
 import { settingsForPreset } from "../game/difficulty";
+import { standings } from "../game/scoring";
+import type { GameState } from "../game/types";
 
 function manager(): RoomManager {
   return new RoomManager(new SeatTokenService("test-secret"));
@@ -255,6 +257,171 @@ describe("starting a game", () => {
     expect(again.ok).toBe(false);
     if (again.ok) return;
     expect(again.error.code).toBe("ROOM_STARTED");
+  });
+});
+
+/**
+ * Marks the live game as finished the way the engine would. The engine's
+ * `endGame` is private, so the test replaces the room's state directly —
+ * the rematch code must only ever trust `phase === "over"`.
+ */
+function finish(rooms: RoomManager, code: string): GameState {
+  const room = rooms.get(code);
+  if (!room?.state) throw new Error("no game to finish");
+  const over: GameState = {
+    ...room.state,
+    phase: "over",
+    step: { kind: "gameOver" },
+    burnableBy: [],
+    result: standings(room.state),
+  };
+  room.state = over;
+  return over;
+}
+
+describe("rematching", () => {
+  it("deals the next game for the same seats", () => {
+    const rooms = manager();
+    const created = rooms.createRoom("Ada");
+    if (!created.ok) throw new Error("create failed");
+    fill(rooms, created.value.code, ["Grace", "Alan"]);
+    const started = rooms.startGame(created.value.code, created.value.playerId, 1000);
+    if (!started.ok) throw new Error("start failed");
+    const before = started.value;
+    finish(rooms, created.value.code);
+
+    const rematch = rooms.rematch(created.value.code, created.value.playerId, 5000);
+    expect(rematch.ok).toBe(true);
+    if (!rematch.ok) return;
+    const after = rematch.value;
+    expect(after.phase).toBe("playing");
+    expect(after.step.kind).toBe("setupPeek");
+    // Same seats, same names, same host — a rematch never re-lobbies.
+    expect(
+      after.players.map((player) => ({
+        id: player.id,
+        name: player.name,
+        seat: player.seat,
+        isHost: player.isHost,
+      })),
+    ).toEqual(
+      before.players.map((player) => ({
+        id: player.id,
+        name: player.name,
+        seat: player.seat,
+        isHost: player.isHost,
+      })),
+    );
+    // The decided settings carry over untouched.
+    expect(after.settings).toEqual(before.settings);
+    // A fresh deal, not a replay of the old deck.
+    expect(after.rngSeed).not.toBe(before.rngSeed);
+    // Card conservation: a complete deck, every card exactly once.
+    const ids = allCardIds(after);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toHaveLength(52 * after.settings.deckCount);
+  });
+
+  it("is the host's privilege alone, and a refusal leaves the game over", () => {
+    const rooms = manager();
+    const created = rooms.createRoom("Ada");
+    if (!created.ok) throw new Error("create failed");
+    const [playerId] = fill(rooms, created.value.code, ["Grace", "Alan"]);
+    rooms.startGame(created.value.code, created.value.playerId, 1000);
+    const finished = finish(rooms, created.value.code);
+
+    const refused = rooms.rematch(created.value.code, playerId, 5000);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("NOT_ALLOWED");
+    expect(refused.error.message).toBe("Only the host can start the next game.");
+    // The finished game is untouched, so every client keeps its results.
+    expect(rooms.get(created.value.code)?.state).toBe(finished);
+    expect(rooms.get(created.value.code)?.state?.phase).toBe("over");
+  });
+
+  it("refuses a rematch while the current game is still in play", () => {
+    const rooms = manager();
+    const created = rooms.createRoom("Ada");
+    if (!created.ok) throw new Error("create failed");
+    fill(rooms, created.value.code, ["Grace", "Alan"]);
+    rooms.startGame(created.value.code, created.value.playerId, 1000);
+
+    const refused = rooms.rematch(created.value.code, created.value.playerId, 5000);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("WRONG_PHASE");
+    expect(refused.error.message).toBe("The current game is still in play.");
+  });
+
+  it("refuses a rematch in a room whose game never started", () => {
+    const rooms = manager();
+    const created = rooms.createRoom("Ada");
+    if (!created.ok) throw new Error("create failed");
+    fill(rooms, created.value.code, ["Grace", "Alan"]);
+
+    const refused = rooms.rematch(created.value.code, created.value.playerId, 5000);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("WRONG_PHASE");
+    expect(refused.error.message).toBe("The game has not started yet.");
+  });
+
+  it("rejects an unknown room and an unknown actor like startGame does", () => {
+    const rooms = manager();
+    const created = rooms.createRoom("Ada");
+    if (!created.ok) throw new Error("create failed");
+
+    const unknownRoom = rooms.rematch("ZZZZZZ", created.value.playerId, 1000);
+    expect(unknownRoom.ok).toBe(false);
+    if (!unknownRoom.ok) expect(unknownRoom.error.code).toBe("ROOM_NOT_FOUND");
+    const unknownActor = rooms.rematch(created.value.code, "p_nobody", 1000);
+    expect(unknownActor.ok).toBe(false);
+    if (!unknownActor.ok) expect(unknownActor.error.code).toBe("PLAYER_NOT_FOUND");
+  });
+
+  it("refuses a rematch after the roster shrank below the minimum", () => {
+    const rooms = manager();
+    const created = rooms.createRoom("Ada");
+    if (!created.ok) throw new Error("create failed");
+    const [playerId] = fill(rooms, created.value.code, ["Grace", "Alan"]);
+    rooms.startGame(created.value.code, created.value.playerId, 1000);
+    finish(rooms, created.value.code);
+
+    rooms.forfeit(created.value.code, playerId);
+    const refused = rooms.rematch(created.value.code, created.value.playerId, 5000);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("NOT_ENOUGH_PLAYERS");
+    expect(refused.error.message).toBe("A game needs between 3 and 6 players.");
+  });
+
+  it("clears a forfeit that was pending at game over", () => {
+    const rooms = manager();
+    const created = rooms.createRoom("Ada");
+    if (!created.ok) throw new Error("create failed");
+    const joined = fill(rooms, created.value.code, ["Grace", "Alan", "Linus"]);
+    rooms.startGame(created.value.code, created.value.playerId, 1000);
+    finish(rooms, created.value.code);
+
+    // "Over" is not a safe step boundary, so the forfeited seat is still
+    // pending in the finished game.
+    rooms.forfeit(created.value.code, joined[2]);
+    const room = rooms.get(created.value.code);
+    if (!room) throw new Error("no room");
+    expect(room.pendingForfeits).toEqual([joined[2]]);
+
+    const rematch = rooms.rematch(created.value.code, created.value.playerId, 5000);
+    expect(rematch.ok).toBe(true);
+    // The pending forfeit belongs to the finished game and is never
+    // replayed onto the fresh deal.
+    expect(room.pendingForfeits).toEqual([]);
+    if (!rematch.ok) return;
+    expect(rematch.value.players.map((player) => player.name)).toEqual([
+      "Ada",
+      "Grace",
+      "Alan",
+    ]);
   });
 });
 

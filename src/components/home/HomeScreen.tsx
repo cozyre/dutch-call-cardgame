@@ -163,6 +163,20 @@ export function HomeScreen({ initialRoomCode = "" }: HomeScreenProps) {
               {error}
             </p>
           ) : null}
+
+          {/* Practice (plan §13 exception): the in-process bot table — a
+              quiet entry, never a second primary action. */}
+          <Button
+            variant="ghost"
+            fullWidth
+            className="md:mt-3"
+            onClick={() => router.push("/practice")}
+          >
+            Play with bots
+          </Button>
+          <p className="mt-2 text-caption text-glaze">
+            Practice a full game against three bots.
+          </p>
         </div>
 
         <HowToPlayButton appearance="link" className="mt-3" />

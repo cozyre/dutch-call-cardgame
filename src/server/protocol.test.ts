@@ -24,6 +24,7 @@ describe("the client message schema", () => {
     ).toBe(true);
     expect(ClientMessageSchema.safeParse({ type: "ping" }).success).toBe(true);
     expect(ClientMessageSchema.safeParse({ type: "room:leave" }).success).toBe(true);
+    expect(ClientMessageSchema.safeParse({ type: "room:rematch" }).success).toBe(true);
   });
 
   it("rejects unknown messages and malformed payloads", () => {
@@ -36,6 +37,17 @@ describe("the client message schema", () => {
     expect(
       ClientMessageSchema.safeParse({ type: "room:join", code: "ABC123", name: "A" }).success,
     ).toBe(true);
+  });
+
+  it("rejects a rematch message that carries extra keys", () => {
+    // The schema is strict: a client cannot smuggle a card value or any
+    // other payload into a message that needs none (plan §7).
+    expect(
+      ClientMessageSchema.safeParse({ type: "room:rematch", cardIndex: 0 }).success,
+    ).toBe(false);
+    expect(
+      ClientMessageSchema.safeParse({ type: "room:rematch", rank: "7" }).success,
+    ).toBe(false);
   });
 
   it("rejects settings outside the allowed range", () => {

@@ -150,6 +150,17 @@ export interface GameView {
   turnPlayerId: PlayerId | null;
   deadlineAt: number | null;
   drawPileCount: number;
+  /**
+   * Amendment (Phase 4, approved 2026-10-26): the pile renders a count, not
+   * just its top card. Metadata only — no card identity.
+   */
+  discardPileCount: number;
+  /**
+   * Amendment (Phase 4, approved 2026-10-26): the server clock at projection
+   * time. Clients derive their countdown offset from it, so a skewed device
+   * clock cannot distort a deadline.
+   */
+  serverNow: number;
   discardTop: { rank: Rank; suit: Suit; value: number } | null;
   players: {
     id: PlayerId;
@@ -158,6 +169,12 @@ export interface GameView {
     isHost: boolean;
     connected: boolean;
     cardCount: number;
+    /**
+     * Amendment (Phase 4, approved 2026-10-26): when this player's connection
+     * dropped (server clock). The UI counts down the 60 s grace against it;
+     * `null` while connected. Metadata only.
+     */
+    disconnectedAt: number | null;
   }[];
   myGrid: GridCardView[];
   drawnCard: { rank: Rank; suit: Suit; value: number } | null;

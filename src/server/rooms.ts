@@ -278,28 +278,56 @@ export class RoomManager {
       );
     }
 
-    const players: PlayerState[] = room.players
-      .slice()
-      .sort((a, b) => a.seat - b.seat)
-      .map((player) => ({
-        id: player.id,
-        name: player.name,
-        seat: player.seat,
-        isHost: player.isHost,
-        connected: player.connected,
-        grid: [],
-        peekTokens: 0,
-        queenTokens: 0,
-        disconnectedAt: player.disconnectedAt,
-      }));
+    const dealt = this.deal(room, actorId, now);
+    if (!dealt.ok) return dealt;
+    room.state = dealt.value;
+    return ok(dealt.value);
+  }
 
-    const seed = randomSeed();
-    const lobbyState = createLobbyState(room.settings, players, seed);
+  /**
+   * Phase 5 (plan §10): the host starts the next game straight away —
+   * same seats, same settings, a fresh deal. There is no lobby
+   * round-trip, so a **refused** rematch must leave the finished game
+   * untouched: every client keeps its results screen until a rematch
+   * actually lands. Every check therefore runs before `room.state`
+   * changes.
+   */
+  rematch(code: string, actorId: PlayerId, now: number): RoomResult<GameState> {
+    const room = this.rooms.get(normaliseCode(code));
+    if (!room) return fail("ROOM_NOT_FOUND", "That room does not exist.");
+    const actor = room.players.find((player) => player.id === actorId);
+    if (!actor) return fail("PLAYER_NOT_FOUND", "You are not in this room.");
+    if (!actor.isHost) {
+      return fail("NOT_ALLOWED", "Only the host can start the next game.");
+    }
+    if (!room.state) return fail("WRONG_PHASE", "The game has not started yet.");
+    if (room.state.phase !== "over") {
+      return fail("WRONG_PHASE", "The current game is still in play.");
+    }
+    if (room.players.length < MIN_PLAYERS || room.players.length > MAX_PLAYERS) {
+      return fail(
+        "NOT_ENOUGH_PLAYERS",
+        `A game needs between ${MIN_PLAYERS} and ${MAX_PLAYERS} players.`,
+      );
+    }
 
-    const result = applyAction(lobbyState, { type: "startGame" }, actorId, { now });
-    if (!result.ok) return fail(result.error.code, result.error.message);
-    room.state = result.state;
-    return ok(result.state);
+    const validation = validateSettings(room.settings, room.players.length);
+    if (!validation.ok) {
+      return fail(
+        "INVALID_SETTINGS",
+        validation.errors.map((error) => error.message).join(" "),
+      );
+    }
+
+    const dealt = this.deal(room, actorId, now);
+    if (!dealt.ok) return dealt;
+    room.state = dealt.value;
+    // A forfeit pending at game over is never applied by
+    // `removePlayerFromState` ("over" is not a safe step boundary), so it
+    // is still sitting here — it belongs to the finished game and must
+    // not be replayed onto the fresh deal.
+    room.pendingForfeits = [];
+    return ok(dealt.value);
   }
 
   /* ---------------------------------------------------------------- */
@@ -351,6 +379,36 @@ export class RoomManager {
   /* ---------------------------------------------------------------- */
   /* internals                                                         */
   /* ---------------------------------------------------------------- */
+
+  /**
+   * Deals a fresh game from the room's current roster and settings: a
+   * fresh seed, a lobby state, then the engine's `startGame`. Called only
+   * after every validation has passed (by `startGame` and `rematch`); the
+   * actor must already be the host.
+   */
+  private deal(room: Room, actorId: PlayerId, now: number): RoomResult<GameState> {
+    const players: PlayerState[] = room.players
+      .slice()
+      .sort((a, b) => a.seat - b.seat)
+      .map((player) => ({
+        id: player.id,
+        name: player.name,
+        seat: player.seat,
+        isHost: player.isHost,
+        connected: player.connected,
+        grid: [],
+        peekTokens: 0,
+        queenTokens: 0,
+        disconnectedAt: player.disconnectedAt,
+      }));
+
+    const seed = randomSeed();
+    const lobbyState = createLobbyState(room.settings, players, seed);
+
+    const result = applyAction(lobbyState, { type: "startGame" }, actorId, { now });
+    if (!result.ok) return fail(result.error.code, result.error.message);
+    return ok(result.state);
+  }
 
   /** Mirrors connection flags from the roster onto the game state. */
   private syncIntoState(room: Room): void {

@@ -33,6 +33,12 @@ export interface GameClient {
   resumeRoom(code: string, seatToken: string): Promise<RoomSession>;
   updateSettings(settings: GameSettings): void;
   leaveRoom(): void;
+  /**
+   * Host-only "Play again" (plan §10): re-deal the room with the same seats
+   * and settings. The server enforces host + phase; refusals arrive through
+   * the existing `game:error` path, so this is fire-and-forget.
+   */
+  rematch(): void;
 
   send(action: Action): void;
 

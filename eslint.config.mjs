@@ -14,6 +14,18 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
   ]),
   {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: {
+      // Parameters prefixed with `_` are intentionally unused — usually
+      // interface signatures a specific implementation must ignore
+      // (e.g. the local dev client ignoring seat tokens).
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
+    },
+  },
+  {
     files: ["src/game/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [

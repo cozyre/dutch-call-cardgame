@@ -268,6 +268,108 @@ describe("a full game over sockets", () => {
   });
 });
 
+describe("rematching over sockets", () => {
+  it("deals the next game for the same seats straight after the results", async () => {
+    const bots = await threeBots();
+    const code = await seatThree(bots);
+
+    bots[0].act({ type: "startGame" });
+    await bots[0].waitFor(() => bots[0].view?.phase === "playing");
+    await drive(() => bots[0].view?.phase === "over");
+
+    // The finished game's payloads legitimately contain every card
+    // identity (the results screen shows all grids), so they are reset
+    // before the rematch — the leak check below reads the fresh deal
+    // only.
+    for (const bot of bots) bot.resetRaw();
+
+    const rematch = await bots[0].rematch();
+    expect(rematch.phase).toBe("playing");
+    expect(rematch.stepKind).toBe("setupPeek");
+    // A fresh deal starts with an empty discard pile (plan §10).
+    expect(rematch.discardPileCount).toBe(0);
+
+    // Every seat got its own projection of the fresh deal.
+    for (const bot of bots) {
+      await bot.waitFor(() => bot.view?.phase === "playing");
+      expect(bot.view?.stepKind).toBe("setupPeek");
+    }
+    const state = roomOf(code).state;
+    expect(state?.phase).toBe("playing");
+    expect(state?.step.kind).toBe("setupPeek");
+
+    // Nothing was leaked with the fresh deal: whatever identities appear
+    // in a client's payloads are cards that client is allowed to know —
+    // at this point only its own peeked grid cards.
+    for (const bot of bots) {
+      const youId = bot.view?.youId;
+      if (!youId) continue;
+      const current = roomOf(code).state;
+      if (!current) continue;
+      const mine = allowedPairs(current, youId);
+      const seen = new Set<string>();
+      for (const payload of bot.raw) {
+        if (isGameOverPayload(payload)) continue;
+        for (const identity of collectCardIdentities(payload)) seen.add(identity);
+      }
+      const leaked = [...seen].filter((identity) => !mine.has(identity));
+      expect(leaked, `${bot.name} saw ${leaked.join(", ")} in the fresh deal`).toEqual([]);
+    }
+
+    for (const bot of bots) bot.close();
+  });
+
+  it("refuses a non-host rematch and keeps the finished game", async () => {
+    const bots = await threeBots();
+    const code = await seatThree(bots);
+
+    bots[0].act({ type: "startGame" });
+    await bots[0].waitFor(() => bots[0].view?.phase === "playing");
+    await drive(() => bots[0].view?.phase === "over");
+
+    const before = JSON.stringify(roomOf(code).state);
+    bots[1].socket.emit("room:rematch", {});
+    await bots[1].waitFor(() => bots[1].errors.length > 0);
+    expect(bots[1].errors[0].code).toBe("NOT_ALLOWED");
+    expect(bots[1].errors[0].message).toBe("Only the host can start the next game.");
+    // The room stays over: the standings every client shows are intact.
+    expect(JSON.stringify(roomOf(code).state)).toBe(before);
+    expect(bots[1].view?.phase).toBe("over");
+
+    for (const bot of bots) bot.close();
+  });
+
+  it("keeps a seat token valid across the rematch", async () => {
+    const bots = await threeBots();
+    const code = await seatThree(bots);
+    const token = bots[2].seatToken;
+    expect(token).toBeTruthy();
+
+    bots[0].act({ type: "startGame" });
+    await bots[0].waitFor(() => bots[0].view?.phase === "playing");
+    await drive(() => bots[0].view?.phase === "over");
+
+    await bots[0].rematch();
+    await bots[0].waitFor(() => bots[0].view?.phase === "playing");
+
+    // The player reloads the page after the rematch: the same seat token
+    // restores their seat in the fresh game.
+    const returning = new Bot({ name: "Alan", url, autoPlay: false });
+    await returning.connect();
+    await returning.resume(code, token as string);
+    await returning.waitFor(() => returning.view?.phase === "playing");
+    expect(returning.view?.youId).toBe(bots[2].view?.youId);
+    expect(roomOf(code).players.map((player) => player.name)).toEqual([
+      "Ada",
+      "Grace",
+      "Alan",
+    ]);
+
+    returning.close();
+    for (const bot of bots) bot.close();
+  });
+});
+
 describe("server enforcement", () => {
   it("auto-moves an idle player when the deadline passes", async () => {
     const bots = await threeBots(false);

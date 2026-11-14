@@ -155,6 +155,29 @@ export function setupTransport(ctx: TransportContext): void {
       broadcastViews(ctx, seat.code);
     });
 
+    socket.on("room:rematch", (raw: unknown) => {
+      const message = parse(raw, "room:rematch");
+      if (!message || message.type !== "room:rematch") {
+        socket.emit("game:error", invalid("Invalid room:rematch message."));
+        return;
+      }
+      const seat = sessions.seatOf(socket.id);
+      if (!seat) {
+        socket.emit("game:error", invalid("You are not in a room."));
+        return;
+      }
+      const rematch = rooms.rematch(seat.code, seat.playerId, Date.now());
+      if (!rematch.ok) {
+        socket.emit("game:error", rematch.error);
+        return;
+      }
+      // The fresh deal reaches every client as its own projection, with
+      // the same gameStarted event a first game gets (plan §10).
+      broadcastViews(ctx, seat.code);
+      broadcastEvents(ctx, seat.code, [{ type: "gameStarted" }]);
+      broadcastLobby(ctx, seat.code);
+    });
+
     socket.on("game:action", (raw: unknown) => {
       const message = parse(raw, "game:action");
       if (!message || message.type !== "game:action") {

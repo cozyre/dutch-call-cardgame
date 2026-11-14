@@ -42,6 +42,43 @@ describe("view projection (plan §4.4)", () => {
     expect(JSON.stringify(view)).not.toContain("d0-S-2");
   });
 
+  it("reports the discard pile as a count and the server clock (Phase 4 fields)", () => {
+    const view = projectView(fixture(), "p0", START);
+    expect(view.discardPileCount).toBe(2);
+    expect(view.serverNow).toBe(START);
+  });
+
+  it("exposes no card identity through the Phase 4 metadata fields", () => {
+    const state = makeFixture({
+      grids: [[card("5", "S"), card("K", "H")], [card("Q", "C")]],
+      drawPile: [card("10", "H"), card("J", "D")],
+      discardPile: [card("2", "S"), card("3", "H")],
+      step: { kind: "matchWindow", rank: "3", deadlineAt: START + 30_000 },
+      burnableBy: ["p0", "p1"],
+    });
+    state.players[1].connected = false;
+    state.players[1].disconnectedAt = START - 18_000;
+    for (const playerId of ["p0", "p1", "p2"]) {
+      const view = projectView(state, playerId, START);
+      // The disconnected player's countdown is derivable…
+      expect(view.players[1].disconnectedAt).toBe(START - 18_000);
+      // …but the serialized view still carries no card identity from any
+      // grid or pile beyond the sanctioned projections.
+      const serialized = JSON.stringify(view);
+      expect(serialized).not.toContain("d0-C-Q");
+      expect(serialized).not.toContain("d0-K-H");
+      expect(serialized).not.toContain("d0-H-J");
+      expect(serialized).not.toContain('"deck"');
+    }
+  });
+
+  it("reports a connected player's disconnectedAt as null", () => {
+    const view = projectView(fixture(), "p0", START);
+    for (const player of view.players) {
+      expect(player.disconnectedAt).toBeNull();
+    }
+  });
+
   it("shows a reveal to its owner only", () => {
     const state = makeFixture({
       grids: [[card("5", "S")], [card("6", "H")]],

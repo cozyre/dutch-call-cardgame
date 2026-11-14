@@ -109,6 +109,9 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("room:leave"),
   }),
   z.strictObject({
+    type: z.literal("room:rematch"),
+  }),
+  z.strictObject({
     type: z.literal("game:action"),
     action: ActionSchema,
   }),
@@ -199,6 +202,7 @@ export interface ClientToServerEvents {
   "room:resume": (payload: { code: string; seatToken: string }) => void;
   "room:settings": (payload: { settings: GameSettings }) => void;
   "room:leave": (payload?: Record<string, never>) => void;
+  "room:rematch": (payload: Record<string, never>) => void;
   "game:action": (payload: { action: Action }) => void;
   ping: (payload?: unknown) => void;
 }

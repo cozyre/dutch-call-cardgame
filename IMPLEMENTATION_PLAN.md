@@ -244,8 +244,10 @@ export interface GameView {
   turnPlayerId: PlayerId | null;
   deadlineAt: number | null;
   drawPileCount: number;
+  discardPileCount: number;
+  serverNow: number;
   discardTop: { rank: Rank; suit: Suit; value: number } | null;
-  players: { id: PlayerId; name: string; seat: number; isHost: boolean; connected: boolean; cardCount: number }[];
+  players: { id: PlayerId; name: string; seat: number; isHost: boolean; connected: boolean; cardCount: number; disconnectedAt: number | null }[];
   myGrid: GridCardView[];
   drawnCard: { rank: Rank; suit: Suit; value: number } | null;
   matchWindow: { rank: Rank; deadlineAt: number } | null;
@@ -269,6 +271,8 @@ export interface GridCardView {
 ```
 
 > **Amendment (Phase 2).** `queenResolverId` was added: during `awaitQueenSwap` it names the player who must resolve the swap now. Without it the UI would have to guess whose turn it is to answer the "swap two cards?" prompt. It is `null` in every other step.
+
+> **Amendment (Phase 4, approved 2026-10-26 — implemented 2026-11-14).** Three display-only fields were approved for the board: `discardPileCount` (the pile shows a count, not just its top card), `serverNow` (clients derive their countdown offset from the server clock, so a skewed device clock cannot distort a deadline) and `players[].disconnectedAt` (an accurate `Reconnecting 0:42` countdown against the 60 s grace window; `null` while connected). All three are metadata: none may carry a card identity, and `projectView` must still pass every leak test in `src/game/view.test.ts`. All three landed in `src/game/types.ts` + `src/game/view.ts` with leak tests; the client captures the `serverNow − Date.now()` offset when a view arrives and hands it to the board as a plain number, so no render ever reads the wall clock.
 
 ```ts
 export function projectView(state: GameState, playerId: PlayerId, now: number): GameView;
@@ -471,11 +475,14 @@ room:join    { code, name }                → room:joined   { code, seatToken, 
 room:resume  { code, seatToken }           → room:joined   { code, seatToken, lobby }
 room:settings{ settings }                  → room:state    { lobby }
 room:leave   { }                           → (seat is forfeited)
+room:rematch { }                           → fresh deal (host only, phase must be "over")
 game:action  { action }                    → game:error    { code, message } (on rejection)
 ping                                          → pong
 ```
 
 > **Amendment (Phase 2).** Two messages were added to the list above: `room:settings` (the host edits the difficulty before the game starts) and `room:leave` (a player leaves the table on purpose instead of dropping the connection). Every inbound message is validated with a **strict** schema: an unknown key is a rejection, not a silent strip, because a client that tries to report a card value is a client that is trying to cheat. The socket.io event name carries the message type and is re-attached *after* the payload spread, so a client cannot spoof the type either.
+>
+> **Amendment (Phase 5).** `room:rematch` was added: the host restarts the finished game as an immediate fresh deal — same seats, same settings, new seed, no lobby round-trip (decision recorded in §10). It is seat-token authenticated like `room:settings` and refuses `NOT_ALLOWED` (non-host), `WRONG_PHASE` (no game / still playing) and `NOT_ENOUGH_PLAYERS`; a refusal never touches the finished state, so every client keeps its results screen. On success the transport broadcasts fresh per-player views, a `gameStarted` event and the lobby (the lobby is the live source of host identity, since a forfeited host transfers there but not in the frozen results view).
 
 Server → client:
 ```
@@ -516,6 +523,8 @@ game:error   { code, message }
 
 ## 8. Phase 3 — Menus
 
+> **Status: done.** Implemented in `src/app/page.tsx` + `src/components/home/**`, `src/app/room/[code]/page.tsx` + `src/components/lobby/**`, `src/components/ui/**`, `src/components/card/**`, the shared `src/components/help/**` dialog and `src/lib/client/**` (socket client with a pending queue, seat-token storage and resume). Verified against the Figma Home/Lobby frames at 390 and 1440, with breakpoint checks at 390/768/1024/1280/1439/1440. 175 vitest cases pass; lint, tsc and the production build are clean. The live game view still renders the placeholder `GameInProgress` — that is Phase 4.
+
 - **Home** (`src/app/page.tsx`): "Create Game" / "Join Game". Create → name field → creates room → navigates to `/room/{code}` and stores the seat token. Join → name + 6-char code. `?room=CODE` in the URL auto-fills the code.
 - **Lobby** (`src/app/room/[code]/`): player list with connection dots, room code with copy button, copy-link button, host-only settings panel (5 preset radio buttons + Custom with numeric inputs and inline validation errors), Start button (host only; enabled at 3–6 players), "waiting on X" indicators.
 - **Resume**: on load, if a seat token for that code exists in `localStorage`, attempt `room:resume` first and skip the join form.
@@ -527,6 +536,19 @@ game:error   { code, message }
 ---
 
 ## 9. Phase 4 — Game board
+
+> **Status: done (2026-11-14).** The board and results screen are implemented in `src/components/game/**` (`GameBoard`, `GameHeader`, `OpponentRail`, `PlayerGrid` + `CardSlot`, `CenterPiles`, `TurnPanel`, `MatchBanner`, `DutchCallDialog`, `ConnectionBanner`, `EventToast`, `ResultsScreen`) plus the pure display helpers in `game-ui.ts` (unit-tested) and the ticker in `use-now.ts`. `/room/[code]` renders `<GameBoard>` for every non-lobby view; `?local=1` selects the `LocalGameClient` dev harness (`/room/CODE?local=1` seats you at a fresh table with three simulated opponents). Built against the real Figma frames (mobile `4:61`/`4:187`, desktop `5:351`, results `3:187`/`5:160`), read via the Figma MCP server. Verified: 209 vitest cases, lint, tsc, production build and `npm run sim` (5/5 games, 0 leaks) all clean.
+>
+> **Recorded divergences from the design mock** (approved during the build):
+> - ~~The results screen ships without the mock's "Play again" button~~ **resolved in Phase 5** — `room:rematch` landed and the button is there (plan §10).
+> - Mobile results render **every** player's grid face-up, matching the desktop frame `5:160` and the approved scope; the mobile mock `3:187` shows only the winner's grid.
+> - The desktop own-grid renders 6 cards in one row per frame `5:351`, exceeding the mirrored "max 5 columns" token — the frame wins (see AGENTS.md rule).
+
+**Scope as approved (2026-10-26)**
+- **Results screen belongs to Phase 4**, not Phase 5. Render it from `view.result` once `phase === "over"`.
+- **`LocalGameClient` is required**, not optional: the exit criterion is one tab + three simulated opponents.
+- The three `GameView` additions in §4.4 (`discardPileCount`, `serverNow`, `players[].disconnectedAt`) must land before the board renders.
+- Keep rule logic out of React. Pure display helpers live in `src/components/game/game-ui.ts` (grid columns, card sizing, clock formatting, queen-target validation, event/turn copy) and are unit-tested; components only render `GameView` and dispatch `Action`s.
 
 Layout:
 - **Your grid**: bottom-centre, responsive, max 5 columns × 4 rows; interactive. Face-down cards show the back; a revealed card shows its face for the reveal window, then flips back.
@@ -546,30 +568,56 @@ Layout:
 - `CardBack` — one uniform SVG back. The design's card back is a *tile* back (Delft blue with a lighter inner border and a centred motif), drawn in-repo as SVG — keep it an in-repo vector, no external assets.
 - Sizes via a `size` prop; all vector. The design's sizes are S 44×62, M 64×90, L 92×130.
 
-**Client architecture** — code against a `GameClient` interface so the UI can be built without the live server:
+**Client architecture** — code against a `GameClient` interface so the UI can be built without the live server (implemented in `src/lib/client/game-client.ts`; the real transport is `src/lib/client/socket-client.ts`):
 ```ts
 export interface GameClient {
   connect(): void;
-  send(action: Action): void;
-  onView(cb: (view: GameView) => void): void;
-  onEvent(cb: (event: GameEvent) => void): void;
-  onError(cb: (err: { code: string; message: string }) => void): void;
   disconnect(): void;
+  createRoom(name: string, settings?: GameSettings): Promise<RoomSession>;
+  joinRoom(code: string, name: string): Promise<RoomSession>;
+  resumeRoom(code: string, seatToken: string): Promise<RoomSession>;
+  updateSettings(settings: GameSettings): void;
+  leaveRoom(): void;
+  send(action: Action): void;
+  onLobby(cb: (lobby: LobbyView) => void): Unsubscribe;
+  onView(cb: (view: GameView) => void): Unsubscribe;
+  onEvent(cb: (event: GameEvent) => void): Unsubscribe;
+  onError(cb: (error: GameError) => void): Unsubscribe;
+  onSettingsError(cb: (errors: SettingsError[]) => void): Unsubscribe;
+  onStatus(cb: (status: ConnectionStatus) => void): Unsubscribe;
+  getCachedLobby(): LobbyView | null;
+  getCachedView(): GameView | null;
+  getSeat(): RoomSession | null;
 }
 ```
-Implementations: `SocketGameClient` (real) and `LocalGameClient` (in-process engine — instant iteration for UI work; dev-only).
+Implementations: `SocketGameClient` (real) and `LocalGameClient` (`src/lib/client/local-client.ts` — in-process `GameState` driven by `applyAction` / `applyTimeout` / `projectView`, the player's seat plus three simulated opponents that act only from their own `GameView`; dev-only, never the production default).
+
+**Phase 4 components** (`src/components/game/`): `GameBoard` (orchestrator; subscriptions, local selection state, clocks), `GameHeader`, `OpponentRail`, `PlayerGrid` + `CardSlot`, `CenterPiles`, `TurnPanel` (360 px desktop sidebar / pinned mobile action sheet), `MatchBanner`, `DutchCallDialog`, `ConnectionBanner`, `EventToast`, the results components, and `use-now.ts` (a ticker that only runs while a deadline or reveal is live). Replace the placeholder in `src/app/room/[code]/page.tsx` with `<GameBoard client={client} view={view} code={code} onLeave={onLeave} />`.
+
+**Interaction mapping**
+- `setupPeek` → own grid selectable, `peek`, show the value, hide it client-side after the design's short window.
+- `turnStart` → Draw; Dutch Call only when `canDutchCall`.
+- `awaitChoice` → drawn card visible to the active player only; own-card select sends `selectCard`, Swap sends `swapDrawn`, Discard sends `discardDrawn`.
+- `matchWindow` → rank + countdown; if `canBurn`, own slots send `burn`. A wrong-burn rank is never inferred — the `burned` event carries `null`.
+- `awaitPeek` → one peek per token; already-peeked slots disabled within the batch.
+- `awaitQueenSwap` → only the resolver acts; any two distinct slots across any grids (including one grid), Confirm sends `queenSwap`, Skip sends `declineQueen`.
+- `dutchCall` → native confirmation; `gameOver` → results screen.
+
+**Timing and anti-cheat UI** — timers are display-only (the server executes timeouts); derive countdowns from `serverNow`; never render a revealed value past `revealedUntil` and only from `myGrid[].revealed`; reset local selection/queen/peek state when the step identity changes; opponent cards stay backs until the results screen. No animation or sound in Phase 4.
 
 **Exit criteria:** a full game is playable in one browser tab against `LocalGameClient` with 3 simulated opponents, then over a real socket with 3 real clients. All PRD actions reachable in the UI.
 
 ---
 
-## 10. Phase 5 — Results
+## 10. Phase 5 — Rematch & post-game
 
-- Standings table: rank, name, total, card count, winner highlight, outright-win callout.
-- Every player's grid revealed face-up.
-- Co-winner indication on ties.
-- Host-only "Play again" (fresh room, same players, new deal).
-- **Design**: mobile results `3:187`, desktop results `5:160`.
+> **Status: done (2026-11-14).** A host-only `room:rematch` (§7) plus the Practice-vs-bots entry point. The results screen (`src/components/game/ResultsScreen.tsx`) now carries the mock's actions: the host gets **Play again** (primary, `md:w-[320px]`, "Starting…" while the request is in flight) above a secondary **Leave room**; non-hosts see `Waiting for {host} to start the next game…`. Refusals surface as a toast over the results screen (the `EventToast` renders in both board branches). Host identity for the button comes from the **lobby**, not the results view: a host who forfeited transfers in the lobby but not in the frozen `GameView`. Verified: 225 vitest cases, lint, tsc, production build and `npm run sim` (5/5 games, 0 leaks) all clean.
+>
+> **Decisions recorded:**
+> - **Rematch = immediate fresh deal**, same seats, same settings, fresh seed — no lobby round-trip (the alternative needed a way to clear every client's cached `phase: "over"` view, which `GameView` has no payload for). Recorded limitation: while a game object exists `room:join` refuses, so a room that drops below 3 seats cannot be refilled — the rematch is refused with `NOT_ENOUGH_PLAYERS` and the players leave.
+> - **`room.pendingForfeits` is cleared on every new deal** (a forfeit pending at game over is never applied by `removePlayerFromState` and must not be replayed onto the fresh game).
+> - **Figma frames 3:187 / 5:160 could not be re-read** (no Composio/MCP on the machine at build time): the button placement was approved as Play again primary above Leave room secondary, following the one-orange rule.
+> - **Practice vs bots** (the §13 exception): Home gains one ghost entry **"Play with bots"** → `/practice`, which reuses the existing lobby screen (you as host + the three `LocalGameClient` bots, editable settings, Start) with the room-code panel replaced by a "Practice table" panel; the board header reads `Practice table · <difficulty>` instead of `Room <code>`. Practice is strictly in-process — bots never join a real room, no protocol surface. `?local=1` remains the instant-start dev harness. The local bots now also Dutch Call when `canDutchCall`, decided only from their own `projectView`.
 
 ---
 
@@ -614,6 +662,8 @@ The PRD leaves these open. Physical-game research informed the defaults. **Corre
 
 Accounts · login · chat/voice · spectator mode · AI/bot players as participants · persistent stats/history · discard-pile draws · discard-pile recycling · Dutch success/failure scoring · multi-round 100-point match scoring · sound effects and animations (Phase 6 only) · mobile native app.
 
+> **Exception (Phase 5).** "AI/bot players as participants" means bots seated in a **real network room** — still out of scope, no protocol surface exists for them. The Practice-vs-bots entry (`/practice`, plan §10) is different: it is the in-process `LocalGameClient` dev harness with a product entry point. Bots there never touch the server, the room registry or a real room.
+
 ---
 
 ## 14. Gotchas for agents
@@ -649,3 +699,4 @@ Accounts · login · chat/voice · spectator mode · AI/bot players as participa
 4. Keep `src/game/**` pure — if you find yourself wanting to `import` anything from React, Next, or Node, the logic belongs elsewhere.
 5. After each phase: `npm run lint`, `npm test`, `npm run build`. All three must be clean.
 6. Record new rule clarifications in §12 and update the PRD if the product behaviour genuinely changed.
+7. If you stop mid-phase, leave `handover_task.md` current: status, the verified baseline (test count plus the four commands), the blocker, and the exact next action. It is the only file that records where work actually paused.
